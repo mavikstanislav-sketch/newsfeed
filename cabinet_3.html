@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NewsFeed</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0e1117;--s1:#17212b;--s2:#1c2733;--s3:#242f3d;--s4:#2b5278;
+  --blue:#2b9ddd;--blue2:#5ab3e8;--blue3:#c5dff0;
+  --text:#e8f1f8;--t2:#a8b8c8;--t3:#6b7f94;--t4:#435261;
+  --green:#4dcd5e;--red:#e05555;--orange:#ff8c42;--pink:#ff6b9d;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
+  --sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+.layout{display:flex;min-height:100vh}
+
+.sidebar{width:260px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:10}
+.profile{padding:16px;background:var(--s2);display:flex;align-items:center;gap:12px;cursor:pointer;border-bottom:1px solid var(--border)}
+.profile:hover{background:var(--s3)}
+.avatar-wrap{position:relative;flex-shrink:0}
+.avatar{width:46px;height:46px;border-radius:50%;background:var(--s4);display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden;border:2px solid var(--blue)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.online-dot{position:absolute;bottom:1px;right:1px;width:10px;height:10px;border-radius:50%;background:var(--green);border:2px solid var(--s2)}
+.profile-info{flex:1;min-width:0}
+.profile-name{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profile-sub{font-size:13px;color:var(--t3);margin-top:2px}
+#avatar-input{display:none}
+.search-wrap{padding:8px 10px;border-bottom:1px solid var(--border)}
+.search{display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:20px;padding:7px 12px}
+.search svg{width:15px;height:15px;stroke:var(--t3);fill:none;stroke-width:2;flex-shrink:0}
+.search input{background:none;border:none;outline:none;font-size:14px;font-family:var(--sans);color:var(--text);width:100%}
+.search input::placeholder{color:var(--t3)}
+.nav{flex:1;overflow-y:auto;padding:4px 0}
+.nav::-webkit-scrollbar{width:4px}
+.nav::-webkit-scrollbar-thumb{background:var(--s3);border-radius:2px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background 0.1s;position:relative}
+.nav-item:hover{background:var(--s2)}
+.nav-item.active{background:var(--s4)}
+.nav-icon{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;background:var(--s3)}
+.nav-icon svg{width:18px;height:18px;stroke:var(--t2);fill:none;stroke-width:1.8}
+.nav-info{flex:1;min-width:0}
+.nav-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-sub{font-size:12px;color:var(--t3);margin-top:1px}
+.nav-badge{min-width:20px;height:20px;border-radius:10px;background:var(--blue);font-size:11px;font-weight:600;color:#fff;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}
+
+.main{margin-left:260px;flex:1;display:flex;flex-direction:column}
+.topbar{height:54px;background:var(--s1);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 16px;position:sticky;top:0;z-index:5}
+.topbar-avatar{width:36px;height:36px;border-radius:50%;background:var(--s4);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;overflow:hidden}
+.topbar-avatar img{width:100%;height:100%;object-fit:cover}
+.topbar-info{flex:1}
+.topbar-title{font-size:15px;font-weight:600}
+.topbar-sub{font-size:12px;color:var(--t3);margin-top:1px}
+.topbar-actions{display:flex;gap:4px}
+.icon-btn{width:36px;height:36px;border-radius:50%;background:transparent;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.15s}
+.icon-btn:hover{background:var(--s2)}
+.icon-btn svg{width:18px;height:18px;stroke:var(--t2);fill:none;stroke-width:1.8}
+
+.page{display:none;flex:1}
+.page.active{display:block}
+
+/* FILTER */
+.filter-bar{position:sticky;top:54px;z-index:4;background:var(--bg);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;gap:6px;overflow-x:auto}
+.filter-bar::-webkit-scrollbar{display:none}
+.chip{padding:5px 14px;border-radius:16px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:var(--s2);color:var(--t2);transition:all 0.15s;white-space:nowrap;flex-shrink:0}
+.chip:hover{background:var(--s3);color:var(--text)}
+.chip.on{background:var(--blue);color:#fff}
+
+/* FEED */
+.msg-wrap{padding:8px 16px 24px}
+.msg-date{text-align:center;margin:12px 0}
+.msg-date span{background:rgba(23,33,43,0.9);color:var(--t2);font-size:12px;padding:4px 12px;border-radius:12px}
+.news-msg{display:flex;gap:8px;margin-bottom:8px;animation:fadeIn 0.2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg-avatar{width:36px;height:36px;border-radius:50%;background:var(--s4);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;align-self:flex-end}
+.msg-bubble{max-width:calc(100% - 50px);background:var(--s2);border-radius:12px 12px 12px 4px;padding:10px 12px;position:relative}
+.msg-channel{font-size:13px;font-weight:600;color:var(--blue2);margin-bottom:5px}
+.msg-title{font-size:14px;font-weight:600;line-height:1.4;color:var(--text);margin-bottom:6px}
+.msg-body{font-size:13px;color:var(--t2);line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.msg-body.exp{-webkit-line-clamp:unset}
+.expand-btn{font-size:12px;color:var(--blue);cursor:pointer;background:none;border:none;font-family:var(--sans);padding:4px 0 0;display:block}
+.expand-btn:hover{color:var(--blue2)}
+
+/* МЕДИА */
+.msg-media{margin:8px 0;border-radius:10px;overflow:hidden;position:relative}
+.msg-media img{width:100%;max-height:280px;object-fit:cover;display:block;border-radius:10px}
+.msg-media-video{
+  width:100%;aspect-ratio:16/9;
+  background:var(--s3);border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;position:relative;overflow:hidden;
+}
+.msg-media-video img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.play-btn{
+  width:52px;height:52px;border-radius:50%;
+  background:rgba(0,0,0,0.65);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;z-index:1;
+  border:2px solid rgba(255,255,255,0.3);
+}
+.play-btn svg{width:20px;height:20px;fill:#fff;margin-left:3px}
+.video-label{position:absolute;bottom:8px;left:10px;z-index:1;font-size:11px;color:#fff;background:rgba(0,0,0,0.5);padding:2px 8px;border-radius:10px}
+
+/* AI */
+.msg-ai{margin-top:8px;padding:8px 10px;background:rgba(43,157,221,0.08);border-left:3px solid var(--blue);border-radius:0 6px 6px 0}
+.msg-ai-label{font-size:11px;font-weight:600;color:var(--blue2);margin-bottom:4px;display:flex;align-items:center;gap:5px}
+.msg-ai-label svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+.msg-ai-txt{font-size:12px;color:var(--t2);line-height:1.6}
+.dots{display:flex;gap:3px;align-items:center}
+.dots span{width:4px;height:4px;border-radius:50%;background:var(--blue);animation:blink 1.4s infinite;opacity:0.3}
+.dots span:nth-child(2){animation-delay:0.2s}.dots span:nth-child(3){animation-delay:0.4s}
+@keyframes blink{0%,80%,100%{opacity:0.2}40%{opacity:1}}
+
+/* РЕАКЦИИ + ФУТЕР */
+.msg-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:6px}
+.msg-time{font-size:11px;color:var(--t4)}
+.reactions{display:flex;gap:4px}
+.react-btn{
+  display:flex;align-items:center;gap:3px;
+  padding:3px 9px;border-radius:12px;
+  background:var(--s3);border:1px solid transparent;
+  font-size:13px;cursor:pointer;transition:all 0.15s;
+  color:var(--t2);
+}
+.react-btn:hover{background:var(--s4);border-color:var(--border2)}
+.react-btn.active-like{background:rgba(43,157,221,0.2);border-color:var(--blue);color:var(--blue2)}
+.react-btn.active-fire{background:rgba(255,140,66,0.2);border-color:var(--orange);color:var(--orange)}
+.react-btn.active-heart{background:rgba(255,107,157,0.2);border-color:var(--pink);color:var(--pink)}
+.react-count{font-size:11px;font-weight:500}
+.msg-actions{display:flex;gap:4px}
+.msg-btn{padding:3px 10px;border-radius:12px;background:transparent;border:1px solid var(--border2);font-size:11px;font-weight:500;font-family:var(--sans);color:var(--t2);cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:4px}
+.msg-btn:hover{background:var(--s4);border-color:var(--blue);color:var(--blue2)}
+.msg-btn svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+.btn-save{background:transparent;border:none;cursor:pointer;padding:4px;border-radius:8px;transition:all 0.15s;display:flex;align-items:center}
+.btn-save:hover{background:var(--s3)}
+.btn-save svg{width:16px;height:16px;stroke:var(--t3);fill:none;stroke-width:2;transition:all 0.15s}
+.btn-save.saved svg{stroke:#f4c542;fill:#f4c542}
+
+/* SECTION PAGES */
+.ch-section{padding:16px;border-bottom:1px solid var(--border)}
+.ch-section-title{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px}
+.add-row{display:flex;gap:8px;flex-wrap:wrap}
+.inp{flex:1;min-width:130px;padding:9px 13px;background:var(--s2);border:1px solid var(--border2);border-radius:10px;font-size:14px;font-family:var(--sans);color:var(--text);outline:none;transition:border-color 0.15s}
+.inp::placeholder{color:var(--t3)}
+.inp:focus{border-color:var(--blue)}
+.btn-add{padding:9px 16px;border-radius:10px;background:var(--blue);border:none;font-size:14px;font-weight:500;font-family:var(--sans);color:#fff;cursor:pointer;white-space:nowrap}
+.btn-add:hover{opacity:0.85}
+.ch-item{display:flex;align-items:center;gap:12px;padding:10px 16px;transition:background 0.1s}
+.ch-item:hover{background:var(--s2)}
+.ch-av{width:44px;height:44px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.ch-info{flex:1;min-width:0}
+.ch-name{font-size:15px;font-weight:500}
+.ch-sub{font-size:13px;color:var(--t3);margin-top:2px}
+.ch-actions{display:flex;align-items:center;gap:8px}
+.toggle{width:40px;height:22px;border-radius:11px;position:relative;border:none;cursor:pointer;transition:background 0.2s;flex-shrink:0}
+.toggle.on{background:var(--blue)}.toggle.off{background:var(--s3)}
+.knob{position:absolute;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3)}
+.toggle.on .knob{left:20px}.toggle.off .knob{left:2px}
+.btn-del{width:30px;height:30px;border-radius:50%;background:transparent;border:none;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s}
+.btn-del:hover{background:rgba(224,85,85,0.12);color:var(--red)}
+.btn-del svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+
+/* FRIENDS */
+.fr-item{display:flex;align-items:center;gap:12px;padding:10px 16px;transition:background 0.1s}
+.fr-item:hover{background:var(--s2)}
+.fr-av{width:44px;height:44px;border-radius:50%;background:var(--s4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.fr-info{flex:1}
+.fr-name{font-size:15px;font-weight:500}
+.fr-id{font-size:12px;color:var(--t3);margin-top:2px}
+.btn-send-tg{padding:6px 12px;border-radius:16px;background:var(--s4);border:none;font-size:12px;font-weight:500;font-family:var(--sans);color:var(--blue2);cursor:pointer}
+.btn-send-tg:hover{opacity:0.8}
+
+/* SETTINGS */
+.set-section{border-bottom:1px solid var(--border);padding:16px}
+.set-title{font-size:12px;font-weight:600;color:var(--blue2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px}
+.set-field{margin-bottom:12px}
+.set-label{font-size:13px;color:var(--t2);margin-bottom:6px;display:block}
+.set-inp{width:100%;padding:10px 13px;background:var(--s2);border:1px solid var(--border2);border-radius:10px;font-size:14px;font-family:var(--sans);color:var(--text);outline:none;transition:border-color 0.15s}
+.set-inp::placeholder{color:var(--t3)}
+.set-inp:focus{border-color:var(--blue)}
+select.set-inp{cursor:pointer}
+.btn-save{width:100%;padding:11px;background:var(--blue);border:none;border-radius:10px;font-size:14px;font-weight:500;font-family:var(--sans);color:#fff;cursor:pointer;margin-top:4px}
+.btn-save:hover{opacity:0.85}
+.saved-ok{margin-top:10px;padding:10px 13px;background:rgba(77,205,94,0.1);border-radius:10px;font-size:13px;color:var(--green);display:none;align-items:center;gap:7px}
+.saved-ok svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.5}
+.set-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
+.set-row:last-child{border-bottom:none;padding-bottom:0}
+.set-row-l{font-size:14px}
+.set-row-s{font-size:12px;color:var(--t3);margin-top:3px}
+
+/* ПРОФИЛЬ */
+.profile-hero{background:linear-gradient(180deg,var(--s4) 0%,var(--s1) 100%);padding:32px 16px 20px;display:flex;flex-direction:column;align-items:center;text-align:center}
+.profile-big-av{width:90px;height:90px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:40px;border:3px solid var(--blue);margin-bottom:12px;position:relative;cursor:pointer;overflow:hidden}
+.profile-big-av img{width:100%;height:100%;object-fit:cover}
+.av-overlay{position:absolute;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;border-radius:50%}
+.profile-big-av:hover .av-overlay{opacity:1}
+.av-overlay svg{width:24px;height:24px;stroke:#fff;fill:none;stroke-width:2}
+.profile-uname{font-size:20px;font-weight:600;margin-bottom:4px}
+.profile-handle{font-size:14px;color:var(--blue2)}
+.profile-stats{display:flex;gap:0;margin-top:20px;background:var(--s2);border-radius:12px;overflow:hidden;width:100%}
+.p-stat{flex:1;padding:14px;text-align:center;border-right:1px solid var(--border)}
+.p-stat:last-child{border-right:none}
+.p-stat-n{font-size:20px;font-weight:700;color:var(--blue2)}
+.p-stat-l{font-size:11px;color:var(--t3);margin-top:2px}
+
+/* ИЗБРАННОЕ */
+.fav-empty{text-align:center;padding:60px 20px;color:var(--t3)}
+.fav-empty .big-emoji{font-size:48px;display:block;margin-bottom:14px}
+.fav-empty p{font-size:15px;color:var(--t2);margin-bottom:6px;font-weight:500}
+.fav-empty span{font-size:13px}
+
+/* EMPTY */
+.empty{text-align:center;padding:48px 20px;color:var(--t3)}
+.empty svg{width:40px;height:40px;stroke:var(--t4);fill:none;stroke-width:1.5;margin-bottom:14px;display:block;margin-left:auto;margin-right:auto}
+.empty-t{font-size:15px;font-weight:500;color:var(--t2);margin-bottom:6px}
+.empty-s{font-size:13px}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:10px;padding:10px 18px;font-size:13px;color:var(--text);z-index:999;opacity:0;transition:opacity 0.2s;white-space:nowrap;pointer-events:none}
+.toast.show{opacity:1}
+
+/* REACT ANIM */
+@keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.4)}100%{transform:scale(1)}}
+.pop{animation:pop 0.3s ease}
+
+/* MOBILE */
+@media(max-width:720px){
+  .sidebar{transform:translateX(-100%);transition:transform 0.25s;width:280px}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+  .mob{display:flex!important}
+}
+.mob{display:none;background:none;border:none;cursor:pointer;padding:4px;align-items:center;justify-content:center}
+.mob svg{width:20px;height:20px;stroke:var(--t2);fill:none;stroke-width:2}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9}
+.overlay.show{display:block}
+</style>
+</head>
+<body>
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+<input type="file" id="avatar-input" accept="image/*" onchange="changeAvatar(this)">
+
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <div class="profile" onclick="pg('profile')">
+    <div class="avatar-wrap">
+      <div class="avatar" id="sidebar-av">
+        <span id="sidebar-av-e">⚡</span>
+        <img id="sidebar-av-img" src="" style="display:none">
+      </div>
+      <div class="online-dot"></div>
+    </div>
+    <div class="profile-info">
+      <div class="profile-name" id="sidebar-name">Мой кабинет</div>
+      <div class="profile-sub">NewsFeed Pro</div>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <div class="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input placeholder="Поиск" id="search-inp" oninput="searchQ(this.value)">
+    </div>
+  </div>
+  <nav class="nav">
+    <div class="nav-item active" id="ni-feed" onclick="pg('feed',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h10"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Лента</div><div class="nav-sub">Все новости</div></div>
+    </div>
+    <div class="nav-item" id="ni-fav" onclick="pg('fav',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Избранное</div><div class="nav-sub" id="fav-sub">0 сохранено</div></div>
+      <div class="nav-badge" id="fav-badge" style="display:none">0</div>
+    </div>
+    <div class="nav-item" id="ni-channels" onclick="pg('channels',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Каналы</div><div class="nav-sub" id="ch-count">5 каналов</div></div>
+    </div>
+    <div class="nav-item" id="ni-friends" onclick="pg('friends',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Друзья</div><div class="nav-sub" id="fr-count">0 друзей</div></div>
+    </div>
+    <div class="nav-item" id="ni-settings" onclick="pg('settings',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Настройки</div><div class="nav-sub">API ключи</div></div>
+    </div>
+    <div class="nav-item" id="ni-profile" onclick="pg('profile',this)">
+      <div class="nav-icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+      <div class="nav-info"><div class="nav-name">Профиль</div><div class="nav-sub">Фото, имя</div></div>
+    </div>
+  </nav>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <button class="mob" onclick="openSidebar()"><svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <div class="topbar-avatar" id="topbar-av"><span id="topbar-av-e">📰</span><img id="topbar-av-img" src="" style="display:none"></div>
+    <div class="topbar-info">
+      <div class="topbar-title" id="topbar-title">Лента</div>
+      <div class="topbar-sub" id="topbar-sub">все новости</div>
+    </div>
+    <div class="topbar-actions">
+      <button class="icon-btn" onclick="refresh()"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+    </div>
+  </div>
+
+  <!-- ЛЕНТА -->
+  <div class="page active" id="page-feed">
+    <div class="filter-bar" id="filter-bar"></div>
+    <div class="msg-wrap" id="feed-list"></div>
+  </div>
+
+  <!-- ИЗБРАННОЕ -->
+  <div class="page" id="page-fav">
+    <div class="msg-wrap" id="fav-list"></div>
+  </div>
+
+  <!-- КАНАЛЫ -->
+  <div class="page" id="page-channels">
+    <div class="ch-section">
+      <div class="ch-section-title">Добавить канал</div>
+      <div class="add-row">
+        <input class="inp" id="cu" placeholder="@username канала" style="flex:2">
+        <input class="inp" id="cn" placeholder="Название">
+        <input class="inp" id="ce" placeholder="🏷" style="max-width:56px">
+        <button class="btn-add" onclick="addCh()">Добавить</button>
+      </div>
+    </div>
+    <div id="ch-list"></div>
+  </div>
+
+  <!-- ДРУЗЬЯ -->
+  <div class="page" id="page-friends">
+    <div class="ch-section">
+      <div class="ch-section-title">Добавить друга</div>
+      <div class="add-row">
+        <input class="inp" id="fn" placeholder="Имя">
+        <input class="inp" id="fi" placeholder="Telegram ID">
+        <button class="btn-add" onclick="addFr()">Добавить</button>
+      </div>
+    </div>
+    <div id="fr-list"></div>
+  </div>
+
+  <!-- ПРОФИЛЬ -->
+  <div class="page" id="page-profile">
+    <div class="profile-hero">
+      <div class="profile-big-av" onclick="document.getElementById('avatar-input').click()">
+        <span id="big-av-e">⚡</span>
+        <img id="big-av-img" src="" style="display:none">
+        <div class="av-overlay"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
+      </div>
+      <div class="profile-uname" id="profile-uname">Мой кабинет</div>
+      <div class="profile-handle">NewsFeed Pro</div>
+      <div class="profile-stats">
+        <div class="p-stat"><div class="p-stat-n" id="ps-ch">0</div><div class="p-stat-l">каналов</div></div>
+        <div class="p-stat"><div class="p-stat-n" id="ps-fr">0</div><div class="p-stat-l">друзей</div></div>
+        <div class="p-stat"><div class="p-stat-n" id="ps-fav">0</div><div class="p-stat-l">избранных</div></div>
+        <div class="p-stat"><div class="p-stat-n" id="ps-s">0</div><div class="p-stat-l">отправлено</div></div>
+      </div>
+    </div>
+    <div class="ch-section">
+      <div class="ch-section-title">Настройки профиля</div>
+      <div class="set-field"><label class="set-label">Имя кабинета</label><input class="set-inp" id="prof-name" placeholder="Мой кабинет"></div>
+      <button class="btn-save" onclick="savePro()">Сохранить</button>
+    </div>
+  </div>
+
+  <!-- НАСТРОЙКИ -->
+  <div class="page" id="page-settings">
+    <div class="set-section">
+      <div class="set-title">API ключи</div>
+      <div class="set-field"><label class="set-label">Claude API Key</label><input class="set-inp" id="sk" type="password" placeholder="sk-ant-..."></div>
+      <div class="set-field"><label class="set-label">Telegram Bot Token</label><input class="set-inp" id="st" type="password" placeholder="123456:ABC..."></div>
+      <button class="btn-save" onclick="saveS()">Сохранить</button>
+      <div class="saved-ok" id="saved"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Сохранено!</div>
+    </div>
+    <div class="set-section">
+      <div class="set-title">AI комментарии</div>
+      <div class="set-row">
+        <div><div class="set-row-l">Включить AI</div><div class="set-row-s">Claude анализирует каждую новость</div></div>
+        <button class="toggle on" id="tai" onclick="tog(this,'ai')"><div class="knob"></div></button>
+      </div>
+      <div style="padding:10px 0 6px"><div class="set-row-s">Стиль комментариев</div></div>
+      <select class="set-inp" id="ais">
+        <option value="neutral">Нейтральный аналитик</option>
+        <option value="short">Коротко и по делу</option>
+        <option value="critical">Критический взгляд</option>
+        <option value="simple">Простыми словами</option>
+      </select>
+    </div>
+  </div>
+</main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+let channels=JSON.parse(localStorage.getItem('nf_ch')||'null')||[
+  {id:1,username:'ssternenko',name:'Стерненко',emoji:'🇺🇦',on:true},
+  {id:2,username:'vach_govorit',name:'Вач говорит',emoji:'🎙',on:true},
+  {id:3,username:'lachentyt',name:'Лаченко',emoji:'📢',on:true},
+  {id:4,username:'vanek_nikolaev',name:'Ваня Николаев',emoji:'👤',on:true},
+  {id:5,username:'truexanewsua',name:'TrueXA News',emoji:'📰',on:true},
+];
+let friends=JSON.parse(localStorage.getItem('nf_fr')||'[]');
+let settings=JSON.parse(localStorage.getItem('nf_set')||'{}');
+let profile=JSON.parse(localStorage.getItem('nf_pro')||'{"name":"Мой кабинет","emoji":"⚡"}');
+let favorites=JSON.parse(localStorage.getItem('nf_fav')||'[]');
+let aiOn=settings.ai!==false;
+let sent=parseInt(localStorage.getItem('nf_sent')||'0');
+let filt='all';
+
+const DEMO=[
+  {id:1,ch:'ssternenko',emoji:'🇺🇦',
+   title:'Обмін полоненими: повернули ще 10 українців',
+   body:'Сьогодні відбувся черговий обмін військовополоненими. Додому повернулись 10 захисників України, які перебували в полоні понад рік. Серед звільнених — бійці з різних підрозділів ЗСУ.',
+   time:'12:34',ai:null,exp:false,
+   media:{type:'photo',url:'https://picsum.photos/seed/ukraine1/600/340'},
+   reactions:{like:24,fire:18,heart:31}},
+  {id:2,ch:'vach_govorit',emoji:'🎙',
+   title:'Ситуація на фронті: зведення за добу',
+   body:'Протягом доби відбулось 47 бойових зіткнень. Найгарячіші напрямки — Покровськ та Курахове. ЗСУ відбили всі атаки на Харківщині та Сумщині.',
+   time:'11:20',ai:null,exp:false,
+   media:{type:'video',thumb:'https://picsum.photos/seed/front1/600/340',label:'2:34'},
+   reactions:{like:56,fire:89,heart:12}},
+  {id:3,ch:'truexanewsua',emoji:'📰',
+   title:'Зеленський підписав новий закон про мобілізацію',
+   body:'Президент підписав зміни до закону про мобілізацію. Документ передбачає нові категорії відстрочки та спрощення процедури повернення з-за кордону.',
+   time:'10:05',
+   ai:'Закон давно очікувався суспільством і його підписання — логічний крок. Головне питання тепер у практичній реалізації. Реакція суспільства передбачувано неоднозначна.',
+   exp:false,media:null,reactions:{like:102,fire:45,heart:67}},
+  {id:4,ch:'lachentyt',emoji:'📢',
+   title:'НБУ підвищив облікову ставку до 15,5%',
+   body:'Національний банк України підвищив облікову ставку на 0,5 відсоткового пункту. Рішення пов\'язане з прискоренням інфляції та тиском на гривню.',
+   time:'09:30',ai:null,exp:false,
+   media:{type:'photo',url:'https://picsum.photos/seed/nbu1/600/340'},
+   reactions:{like:33,fire:11,heart:8}},
+  {id:5,ch:'vanek_nikolaev',emoji:'👤',
+   title:'Велика пресконференція: відповіді на головні запитання',
+   body:'Президент відповів на запитання журналістів про стан на фронті, економічну ситуацію та плани на майбутнє. Конференція тривала понад дві години.',
+   time:'08:15',ai:null,exp:false,
+   media:{type:'video',thumb:'https://picsum.photos/seed/conf1/600/340',label:'1:48:20'},
+   reactions:{like:201,fire:156,heart:98}},
+];
+let news=[...DEMO];
+let userReacts={};
+
+const styles={neutral:'Нейтральний аналітик. 2-3 речення: суть + контекст.',short:'1-2 речення. Тільки найголовніше.',critical:'Критичний погляд. Що тут викликає питання?',simple:'Поясни як другу, простою мовою.'};
+
+function openSidebar(){document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('show')}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show')}
+
+function changeAvatar(inp){
+  const file=inp.files[0];if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    profile.avatar=e.target.result;
+    localStorage.setItem('nf_pro',JSON.stringify(profile));
+    applyAvatar();
+  };r.readAsDataURL(file);
+}
+
+function applyAvatar(){
+  const url=profile.avatar||'';
+  ['sidebar-av-img','big-av-img','topbar-av-img'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.src=url;el.style.display=url?'block':'none';}
+  });
+  ['sidebar-av-e','big-av-e'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.style.display=url?'none':'';
+  });
+  const te=document.getElementById('topbar-av-e');
+  if(te)te.style.display=url?'none':'';
+}
+
+function pg(name,el){
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  const ni=el||document.getElementById('ni-'+name);
+  if(ni)ni.classList.add('active');
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  const titles={feed:'Лента',fav:'Избранное',channels:'Каналы',friends:'Друзья',settings:'Настройки',profile:'Профиль'};
+  const subs={feed:'все новости',fav:'сохранённые',channels:'управление',friends:'отправка новостей',settings:'API ключи',profile:'настройки аккаунта'};
+  document.getElementById('topbar-title').textContent=titles[name]||name;
+  document.getElementById('topbar-sub').textContent=subs[name]||'';
+  const emojis={feed:'📰',fav:'⭐',channels:'📡',friends:'👥',settings:'⚙️',profile:'👤'};
+  const te=document.getElementById('topbar-av-e');
+  if(te&&!profile.avatar)te.textContent=emojis[name]||'📰';
+  if(name==='channels')rCh();
+  if(name==='friends')rFr();
+  if(name==='settings')lS();
+  if(name==='profile')rPro();
+  if(name==='fav')rFav();
+  closeSidebar();uStats();
+}
+
+function uStats(){
+  const c=channels.filter(x=>x.on).length;
+  const f=friends.length;
+  const fv=favorites.length;
+  document.getElementById('ch-count').textContent=c+' каналов';
+  document.getElementById('fr-count').textContent=f+' друзей';
+  document.getElementById('fav-sub').textContent=fv+' сохранено';
+  const fb=document.getElementById('fav-badge');
+  if(fb){fb.textContent=fv;fb.style.display=fv>0?'flex':'none';}
+  const ps=document.getElementById('ps-ch');if(ps)ps.textContent=c;
+  const pf=document.getElementById('ps-fr');if(pf)pf.textContent=f;
+  const pfv=document.getElementById('ps-fav');if(pfv)pfv.textContent=fv;
+  const pss=document.getElementById('ps-s');if(pss)pss.textContent=sent;
+}
+
+function bChips(){
+  const r=document.getElementById('filter-bar');r.innerHTML='';
+  const a=mk('button','chip'+(filt==='all'?' on':''));
+  a.textContent='Все';a.onclick=()=>{filt='all';bChips();rFeed()};r.appendChild(a);
+  channels.filter(c=>c.on).forEach(ch=>{
+    const b=mk('button','chip'+(filt===ch.username?' on':''));
+    b.textContent=ch.emoji+' '+ch.name;
+    b.onclick=()=>{filt=ch.username;bChips();rFeed()};r.appendChild(b);
+  });
+}
+
+function buildCard(item,inFav){
+  const isSaved=favorites.some(f=>f.id===item.id);
+  const ur=userReacts[item.id]||{};
+  const reactions=item.reactions||{like:0,fire:0,heart:0};
+
+  // медиа
+  let mediaHtml='';
+  if(item.media){
+    if(item.media.type==='photo'){
+      mediaHtml=`<div class="msg-media"><img src="${item.media.url}" loading="lazy" alt=""></div>`;
+    } else if(item.media.type==='video'){
+      mediaHtml=`<div class="msg-media"><div class="msg-media-video" onclick="playVideo(this)">
+        <img src="${item.media.thumb}" loading="lazy" alt="">
+        <div class="play-btn"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+        <span class="video-label">▶ ${item.media.label}</span>
+      </div></div>`;
+    }
+  }
+
+  const sendBtns=friends.length?friends.map(f=>`<button class="msg-btn" onclick="sTF(${item.id},'${f.tgId}','${f.name}')"><svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>${f.name}</button>`).join(''):'';
+
+  return `
+    <div class="msg-channel">${item.emoji} @${item.ch}</div>
+    <div class="msg-title">${item.title}</div>
+    ${mediaHtml}
+    <div class="msg-body${item.exp?' exp':''}" id="b${item.id}">${item.body}</div>
+    <button class="expand-btn" onclick="exp(${item.id})">${item.exp?'Свернуть ▲':'Читать полностью ▼'}</button>
+    <div class="msg-ai" id="ai${item.id}">${aHtml(item)}</div>
+    <div class="msg-foot">
+      <span class="msg-time">${item.time}</span>
+      <div class="reactions">
+        <button class="react-btn${ur.like?' active-like':''}" id="rb-like-${item.id}" onclick="react(${item.id},'like')">
+          👍 <span class="react-count" id="rc-like-${item.id}">${reactions.like}</span>
+        </button>
+        <button class="react-btn${ur.fire?' active-fire':''}" id="rb-fire-${item.id}" onclick="react(${item.id},'fire')">
+          🔥 <span class="react-count" id="rc-fire-${item.id}">${reactions.fire}</span>
+        </button>
+        <button class="react-btn${ur.heart?' active-heart':''}" id="rb-heart-${item.id}" onclick="react(${item.id},'heart')">
+          ❤️ <span class="react-count" id="rc-heart-${item.id}">${reactions.heart}</span>
+        </button>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+      <div class="msg-actions">${sendBtns}</div>
+      <button class="btn-save${isSaved?' saved':''}" id="bs-${item.id}" onclick="toggleFav(${item.id})" title="${isSaved?'Убрать из избранного':'Сохранить'}">
+        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
+    </div>`;
+}
+
+function rFeed(){
+  const list=document.getElementById('feed-list');list.innerHTML='';
+  const active=channels.filter(c=>c.on).map(c=>c.username);
+  let items=news.filter(n=>active.includes(n.ch));
+  if(filt!=='all')items=items.filter(n=>n.ch===filt);
+  if(!items.length){
+    list.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"/></svg><div class="empty-t">Нет новостей</div><div class="empty-s">Включи каналы во вкладке «Каналы»</div></div>`;
+    return;
+  }
+  const dateDiv=mk('div','msg-date');
+  dateDiv.innerHTML=`<span>${new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}</span>`;
+  list.appendChild(dateDiv);
+  items.forEach(item=>{
+    const wrap=mk('div','news-msg');
+    const av=mk('div','msg-avatar');av.textContent=item.emoji;
+    const bubble=mk('div','msg-bubble');
+    bubble.innerHTML=buildCard(item,false);
+    wrap.appendChild(av);wrap.appendChild(bubble);
+    list.appendChild(wrap);
+    if(!item.ai&&aiOn&&settings.claudeKey)fAI(item);
+  });
+}
+
+function rFav(){
+  const list=document.getElementById('fav-list');list.innerHTML='';
+  if(!favorites.length){
+    list.innerHTML=`<div class="fav-empty"><span class="big-emoji">⭐</span><p>Избранное пусто</p><span>Нажми ★ на любой новости чтобы сохранить</span></div>`;
+    return;
+  }
+  const dateDiv=mk('div','msg-date');
+  dateDiv.innerHTML=`<span>Избранное — ${favorites.length} новостей</span>`;
+  list.appendChild(dateDiv);
+  favorites.forEach(item=>{
+    const wrap=mk('div','news-msg');
+    const av=mk('div','msg-avatar');av.textContent=item.emoji;
+    const bubble=mk('div','msg-bubble');
+    bubble.innerHTML=buildCard(item,true);
+    wrap.appendChild(av);wrap.appendChild(bubble);
+    list.appendChild(wrap);
+  });
+}
+
+function toggleFav(id){
+  const item=news.find(n=>n.id===id)||favorites.find(n=>n.id===id);
+  if(!item)return;
+  const idx=favorites.findIndex(f=>f.id===id);
+  if(idx>=0){
+    favorites.splice(idx,1);showT('Убрано из избранного');
+  } else {
+    favorites.push({...item});showT('Добавлено в избранное ⭐');
+  }
+  localStorage.setItem('nf_fav',JSON.stringify(favorites));
+  // обновляем кнопки везде
+  document.querySelectorAll('#bs-'+id).forEach(btn=>{
+    btn.classList.toggle('saved',favorites.some(f=>f.id===id));
+  });
+  uStats();
+}
+
+function react(id,type){
+  if(!userReacts[id])userReacts[id]={};
+  const item=news.find(n=>n.id===id)||favorites.find(n=>n.id===id);
+  if(!item||!item.reactions)return;
+  const btn=document.getElementById('rb-'+type+'-'+id);
+  const cnt=document.getElementById('rc-'+type+'-'+id);
+  if(!btn||!cnt)return;
+  const activeClass='active-'+type;
+  if(userReacts[id][type]){
+    userReacts[id][type]=false;
+    item.reactions[type]--;
+    btn.classList.remove(activeClass);
+  } else {
+    userReacts[id][type]=true;
+    item.reactions[type]++;
+    btn.classList.add(activeClass);
+    btn.classList.add('pop');
+    setTimeout(()=>btn.classList.remove('pop'),300);
+  }
+  cnt.textContent=item.reactions[type];
+}
+
+function playVideo(el){
+  const img=el.querySelector('img');
+  const play=el.querySelector('.play-btn');
+  const label=el.querySelector('.video-label');
+  if(img)img.style.filter='brightness(0.3)';
+  if(play)play.innerHTML='<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+  if(label)label.textContent='▶ воспроизведение...';
+  showT('Видео откроется в канале Telegram');
+}
+
+function aHtml(item){
+  if(item.ai)return`<div class="msg-ai-label"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>Комментарий AI</div><div class="msg-ai-txt">${item.ai}</div>`;
+  if(!aiOn)return`<div class="msg-ai-txt" style="color:var(--t4);font-size:12px">AI отключён</div>`;
+  if(!settings.claudeKey)return`<div class="msg-ai-txt" style="color:var(--t4);font-size:12px">Добавь Claude API Key в настройках</div>`;
+  return`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t3)"><div class="dots"><span></span><span></span><span></span></div>AI анализирует...</div>`;
+}
+
+async function fAI(item){
+  try{
+    const style=styles[settings.aiStyle||'neutral'];
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:200,system:style,messages:[{role:'user',content:`Пост из @${item.ch}:\n\n${item.title}\n\n${item.body}\n\nКомментарий.`}]})});
+    const d=await r.json();const txt=d.content?.[0]?.text;
+    if(txt){item.ai=txt;document.querySelectorAll('#ai'+item.id).forEach(el=>el.innerHTML=aHtml(item));}
+  }catch(e){}
+}
+
+function exp(id){
+  const item=news.find(n=>n.id===id)||favorites.find(n=>n.id===id);if(!item)return;
+  item.exp=!item.exp;
+  document.querySelectorAll('#b'+id).forEach(el=>el.classList.toggle('exp',item.exp));
+  document.querySelectorAll('.expand-btn').forEach(btn=>{
+    const p=btn.parentElement;
+    if(p&&p.querySelector('#b'+id))btn.textContent=item.exp?'Свернуть ▲':'Читать полностью ▼';
+  });
+}
+
+async function sTF(nid,tgId,name){
+  if(!settings.tgToken){showT('Добавь Telegram токен в настройках');return;}
+  const item=news.find(n=>n.id===nid);if(!item)return;
+  const txt=`${item.emoji} <b>@${item.ch}</b>\n\n<b>${item.title}</b>\n\n${item.body}${item.ai?'\n\n🤖 <i>'+item.ai+'</i>':''}`;
+  try{
+    await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:tgId,text:txt,parse_mode:'HTML'})});
+    sent++;localStorage.setItem('nf_sent',sent);uStats();showT(`Отправлено ${name} ✓`);
+  }catch(e){showT('Ошибка отправки');}
+}
+
+function refresh(){news.forEach(n=>{if(!n.ai)n.ai=null});bChips();rFeed();showT('Лента обновлена');}
+
+function searchQ(q){
+  if(!q){bChips();rFeed();return;}
+  if(document.getElementById('page-feed').classList.contains('active')){
+    const list=document.getElementById('feed-list');list.innerHTML='';
+    const found=news.filter(n=>n.title.toLowerCase().includes(q.toLowerCase())||n.body.toLowerCase().includes(q.toLowerCase()));
+    if(!found.length){list.innerHTML=`<div class="empty"><div class="empty-t">Ничего не найдено</div></div>`;return;}
+    found.forEach(item=>{
+      const wrap=mk('div','news-msg');
+      const av=mk('div','msg-avatar');av.textContent=item.emoji;
+      const bubble=mk('div','msg-bubble');
+      bubble.innerHTML=buildCard(item,false);
+      wrap.appendChild(av);wrap.appendChild(bubble);list.appendChild(wrap);
+    });
+  }
+}
+
+function rCh(){
+  const l=document.getElementById('ch-list');l.innerHTML='';
+  if(!channels.length){l.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div class="empty-t">Нет каналов</div></div>`;return;}
+  channels.forEach((ch,i)=>{
+    const el=mk('div','ch-item');
+    el.innerHTML=`<div class="ch-av">${ch.emoji}</div><div class="ch-info"><div class="ch-name">${ch.name}</div><div class="ch-sub">@${ch.username}</div></div><div class="ch-actions"><button class="toggle ${ch.on?'on':'off'}" onclick="tCh(${i},this)"><div class="knob"></div></button><button class="btn-del" onclick="dCh(${i})"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>`;
+    l.appendChild(el);
+  });
+}
+
+function addCh(){
+  const u=document.getElementById('cu').value.trim().replace('@','').toLowerCase();
+  const n=document.getElementById('cn').value.trim();
+  const e=document.getElementById('ce').value.trim()||'📢';
+  if(!u){showT('Введи username канала');return;}
+  if(channels.find(c=>c.username===u)){showT('Уже добавлен');return;}
+  channels.push({id:Date.now(),username:u,name:n||'@'+u,emoji:e,on:true});
+  sCh();rCh();bChips();uStats();
+  document.getElementById('cu').value='';document.getElementById('cn').value='';document.getElementById('ce').value='';
+  showT('Канал добавлен ✓');
+}
+function tCh(i,btn){channels[i].on=!channels[i].on;btn.className='toggle '+(channels[i].on?'on':'off');sCh();bChips();uStats();}
+function dCh(i){if(!confirm('Удалить канал?'))return;channels.splice(i,1);sCh();rCh();bChips();uStats();}
+function sCh(){localStorage.setItem('nf_ch',JSON.stringify(channels));}
+
+function rFr(){
+  const l=document.getElementById('fr-list');l.innerHTML='';
+  if(!friends.length){l.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><div class="empty-t">Нет друзей</div><div class="empty-s">Добавь друга чтобы отправлять ему новости</div></div>`;return;}
+  friends.forEach((fr,i)=>{
+    const el=mk('div','fr-item');
+    el.innerHTML=`<div class="fr-av">👤</div><div class="fr-info"><div class="fr-name">${fr.name}</div><div class="fr-id">ID: ${fr.tgId}</div></div><button class="btn-send-tg" onclick="sendAll('${fr.tgId}','${fr.name}')">Отправить ленту</button><button class="btn-del" onclick="dFr(${i})"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>`;
+    l.appendChild(el);
+  });
+}
+function addFr(){
+  const n=document.getElementById('fn').value.trim();
+  const id=document.getElementById('fi').value.trim();
+  if(!n||!id){showT('Заполни имя и ID');return;}
+  friends.push({name:n,tgId:id});
+  sFr();rFr();uStats();rFeed();
+  document.getElementById('fn').value='';document.getElementById('fi').value='';
+  showT(n+' добавлен ✓');
+}
+async function sendAll(tgId,name){
+  if(!settings.tgToken){showT('Добавь Telegram токен');return;}
+  const active=channels.filter(c=>c.on).map(c=>c.username);
+  const items=news.filter(n=>active.includes(n.ch)).slice(0,3);
+  showT('Отправляю...');
+  for(const item of items){
+    const txt=`${item.emoji} <b>@${item.ch}</b>\n\n<b>${item.title}</b>\n\n${item.body}${item.ai?'\n\n🤖 <i>'+item.ai+'</i>':''}`;
+    try{await fetch(`https://api.telegram.org/bot${settings.tgToken}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:tgId,text:txt,parse_mode:'HTML'})});sent++;await new Promise(r=>setTimeout(r,800));}catch(e){}
+  }
+  localStorage.setItem('nf_sent',sent);uStats();showT(`Лента отправлена ${name} ✓`);
+}
+function dFr(i){friends.splice(i,1);sFr();rFr();uStats();rFeed();}
+function sFr(){localStorage.setItem('nf_fr',JSON.stringify(friends));}
+
+function lS(){
+  document.getElementById('sk').value=settings.claudeKey||'';
+  document.getElementById('st').value=settings.tgToken||'';
+  document.getElementById('ais').value=settings.aiStyle||'neutral';
+  document.getElementById('tai').className='toggle '+(aiOn?'on':'off');
+}
+function saveS(){
+  settings.claudeKey=document.getElementById('sk').value.trim();
+  settings.tgToken=document.getElementById('st').value.trim();
+  settings.aiStyle=document.getElementById('ais').value;
+  settings.ai=aiOn;
+  localStorage.setItem('nf_set',JSON.stringify(settings));
+  const el=document.getElementById('saved');el.style.display='flex';setTimeout(()=>el.style.display='none',2500);
+}
+function tog(btn,key){const on=btn.classList.toggle('on');btn.classList.toggle('off',!on);if(key==='ai')aiOn=on;}
+
+function rPro(){
+  document.getElementById('prof-name').value=profile.name||'Мой кабинет';
+  uStats();
+}
+function savePro(){
+  profile.name=document.getElementById('prof-name').value.trim()||'Мой кабинет';
+  localStorage.setItem('nf_pro',JSON.stringify(profile));
+  document.getElementById('sidebar-name').textContent=profile.name;
+  document.getElementById('profile-uname').textContent=profile.name;
+  showT('Профиль сохранён ✓');
+}
+
+function mk(t,c){const el=document.createElement(t);el.className=c;return el;}
+function showT(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+// INIT
+if(profile.avatar)applyAvatar();
+document.getElementById('sidebar-name').textContent=profile.name||'Мой кабинет';
+document.getElementById('profile-uname').textContent=profile.name||'Мой кабинет';
+bChips();rFeed();uStats();
+</script>
+</body>
+</html>
