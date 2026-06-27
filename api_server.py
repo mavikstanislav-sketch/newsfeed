@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import feedparser
-import json
 import re
 from html import unescape
 
@@ -27,8 +26,7 @@ def clean_html(text):
     return unescape(text).strip()
 
 def get_image(html):
-    import re
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html)
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html or '')
     return match.group(1) if match else None
 
 @app.get("/")
@@ -41,37 +39,38 @@ def get_news():
     for ch in CHANNELS:
         try:
             urls = [
-                f"https://rsshub.app/telegram/channel/{ch['username']}",
                 f"https://tg.i-c-a.su/rss/{ch['username']}",
+                f"https://rsshub.app/telegram/channel/{ch['username']}",
             ]
             for url in urls:
-                feed = feedparser.parse(url)
-                if feed.entries:
-                    for entry in feed.entries[:5]:
-                        desc = entry.get("summary", "")
-                        img = get_image(desc)
-                        text = clean_html(desc)
-                        all_news.append({
-                            "id": entry.get("id", "")[-16:],
-                            "ch": ch["username"],
-                            "name": ch["name"],
-                            "emoji": ch["emoji"],
-                            "title": clean_html(entry.get("title", ""))[:200],
-                            "body": text[:600],
-                            "img": img,
-                            "link": entry.get("link", ""),
-                            "time": entry.get("published", ""),
-                        })
-                    break
+                try:
+                    feed = feedparser.parse(url, request_headers={
+                        'User-Agent': 'Mozilla/5.0 NewsFeedBot/1.0'
+                    })
+                    if feed.entries:
+                        for entry in feed.entries[:5]:
+                            desc = entry.get("summary", "") or entry.get("description", "")
+                            img = get_image(desc)
+                            text = clean_html(desc)
+                            title = clean_html(entry.get("title", ""))
+                            if not title and not text:
+                                continue
+                            all_news.append({
+                                "id": entry.get("id", entry.get("link", ""))[-20:],
+                                "ch": ch["username"],
+                                "name": ch["name"],
+                                "emoji": ch["emoji"],
+                                "title": title[:200],
+                                "body": text[:600],
+                                "img": img,
+                                "link": entry.get("link", ""),
+                                "time": entry.get("published", ""),
+                            })
+                        break
+                except Exception as e:
+                    print(f"Ошибка URL {url}: {e}")
+                    continue
         except Exception as e:
-            print(f"Ошибка {ch['username']}: {e}")
+            print(f"Ошибка канала {ch['username']}: {e}")
+    print(f"Загружено новостей: {len(all_news)}")
     return {"news": all_news, "total": len(all_news)}
-
-@app.get("/news/{channel}")
-def get_channel_news(channel: str):
-    ch = next((c for c in CHANNELS if c["username"] == channel), None)
-    if not ch:
-        return {"error": "Канал не найден"}
-    news = get_news()
-    filtered = [n for n in news["news"] if n["ch"] == channel]
-    return {"news": filtered}
