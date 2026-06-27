@@ -10,7 +10,7 @@ import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
-ANTHROPIC_API_KEY  = "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"
+ANTHROPIC_API_KEY  = "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"
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
