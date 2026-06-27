@@ -1,3 +1,5 @@
 feedparser
 anthropic
 telethon
+fastapi
+uvicorn
