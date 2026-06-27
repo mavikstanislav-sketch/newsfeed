@@ -1,29 +1,34 @@
 import asyncio
+import feedparser
 import anthropic
 import json
 import os
 import hashlib
 from datetime import datetime
-
-from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+from html import unescape
+import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
-TELEGRAM_CHAT_ID   = 8761012731
-API_ID             = 37103823
-API_HASH           = "ebbfc63eb333bd7130ace1a23df460e9"
+TELEGRAM_CHAT_ID   = "8761012731"
 ANTHROPIC_API_KEY  = "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"
 
 CHANNELS = [
-    "ssternenko",
-    "vach_govorit",
-    "lachentyt",
-    "vanek_nikolaev",
-    "truexanewsua",
+    {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
+    {"username": "vach_govorit",  "name": "Вач говорит",   "emoji": "🎙"},
+    {"username": "lachentyt",     "name": "Лаченко",       "emoji": "📢"},
+    {"username": "vanek_nikolaev","name": "Ваня Николаев", "emoji": "👤"},
+    {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
 ]
 
 CHECK_INTERVAL = 300
 SEEN_FILE = "seen_news.json"
+
+def clean_html(text):
+    text = re.sub(r'<[^>]+>', '', text)
+    return unescape(text).strip()
+
+def make_id(url, title):
+    return hashlib.md5((url + title).encode()).hexdigest()[:16]
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -33,25 +38,53 @@ def load_seen():
 
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen)[-1000:], f)
+        json.dump(list(seen)[-500:], f)
 
-def get_ai_comment(text, channel):
+def fetch_news(channel):
+    urls = [
+        f"https://rsshub.app/telegram/channel/{channel['username']}",
+        f"https://tg.i-c-a.su/rss/{channel['username']}",
+    ]
+    for url in urls:
+        try:
+            feed = feedparser.parse(url)
+            if feed.entries:
+                items = []
+                for entry in feed.entries[:3]:
+                    title = clean_html(entry.get("title", ""))
+                    body  = clean_html(entry.get("summary", ""))
+                    link  = entry.get("link", "")
+                    if len(title) < 5:
+                        continue
+                    items.append({
+                        "id": make_id(link, title),
+                        "title": title[:300],
+                        "body": body[:600],
+                        "link": link,
+                        "channel": channel,
+                    })
+                return items
+        except Exception as e:
+            print(f"    ошибка: {e}")
+    return []
+
+def get_ai_comment(title, body, channel_name):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     msg = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=200,
         messages=[{"role": "user", "content":
-            f"Пост из канала @{channel}:\n\n{text[:800]}\n\n"
+            f"Новость из «{channel_name}»:\n\n{title}\n\n{body}\n\n"
             "Напиши комментарий 2-3 предложения на русском: суть + мнение. Без вводных слов."
         }]
     )
     return msg.content[0].text.strip()
 
-async def send_tg_text(bot_token, chat_id, text):
+async def send_tg(text):
     import urllib.request, urllib.parse
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = urllib.parse.urlencode({
-        "chat_id": chat_id,
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
     }).encode()
@@ -59,85 +92,45 @@ async def send_tg_text(bot_token, chat_id, text):
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
-async def send_tg_photo(bot_token, chat_id, photo_path, caption):
-    import urllib.request
-    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-    with open(photo_path, "rb") as f:
-        photo_data = f.read()
-    import urllib.parse
-    boundary = "boundary123"
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption[:1000]}\r\n'
-        f'Content-Disposition: form-data; name="parse_mode"\r\n\r\nHTML\r\n'
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
-        f"Content-Type: image/jpeg\r\n\r\n"
-    ).encode() + photo_data + f"\r\n--{boundary}--\r\n".encode()
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-async def main():
+async def run():
     seen = load_seen()
-    print("Запуск бота с поддержкой фото и видео...")
+    print("Бот запущен!")
 
-    async with TelegramClient("newsfeed_session", API_ID, API_HASH) as client:
-        print("Подключён к Telegram!")
+    try:
+        await send_tg("✅ <b>NewsFeed бот запущен на сервере!</b>\n\nРаботаю 24/7 без вашего ПК!\n\n" +
+            "\n".join(f"{c['emoji']} @{c['username']}" for c in CHANNELS))
+        print("Стартовое сообщение отправлено!")
+    except Exception as e:
+        print(f"Ошибка Telegram: {e}")
+        return
 
-        await send_tg_text(
-            TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-            "✅ <b>NewsFeed запущен!</b>\n\nТеперь с фото и видео!\n\n" +
-            "\n".join(f"@{ch}" for ch in CHANNELS)
-        )
-
-        while True:
-            print(f"[{datetime.now().strftime('%H:%M')}] Проверяю каналы...")
-
-            for channel in CHANNELS:
-                try:
-                    async for msg in client.iter_messages(channel, limit=5):
-                        msg_id = f"{channel}_{msg.id}"
-                        if msg_id in seen:
-                            continue
-
-                        text = msg.text or msg.message or ""
-                        if len(text) < 10 and not msg.media:
-                            seen.add(msg_id)
-                            continue
-
-                        try:
-                            comment = get_ai_comment(text or "пост без текста", channel)
-                        except:
-                            comment = ""
-
-                        caption = f"📢 <b>@{channel}</b>\n\n{text[:600]}"
-                        if comment:
-                            caption += f"\n\n<i>{comment}</i>"
-
-                        if isinstance(msg.media, MessageMediaPhoto):
-                            photo_path = await client.download_media(msg.media, file="temp_photo.jpg")
-                            if photo_path:
-                                await send_tg_photo(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, photo_path, caption)
-                                os.remove(photo_path)
-                            else:
-                                await send_tg_text(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, caption)
-                        else:
-                            await send_tg_text(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, caption)
-
-                        seen.add(msg_id)
-                        print(f"  + @{channel}: отправлено")
-                        await asyncio.sleep(3)
-
-                except Exception as e:
-                    print(f"  Ошибка @{channel}: {e}")
-
-            save_seen(seen)
-            print(f"Жду 5 мин...\n")
-            await asyncio.sleep(CHECK_INTERVAL)
+    while True:
+        print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
+        for ch in CHANNELS:
+            try:
+                items = fetch_news(ch)
+                new_items = [i for i in items if i["id"] not in seen]
+                if not new_items:
+                    print(f"  - @{ch['username']}: нет новых")
+                    continue
+                print(f"  + @{ch['username']}: {len(new_items)} новых")
+                for item in new_items[:2]:
+                    comment = get_ai_comment(item["title"], item["body"], ch["name"])
+                    msg = (
+                        f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
+                        f"<b>{item['title']}</b>\n\n"
+                        f"{item['body'][:400]}\n\n"
+                        f"<i>{comment}</i>"
+                    )
+                    await send_tg(msg)
+                    seen.add(item["id"])
+                    print(f"    отправлено: {item['title'][:50]}")
+                    await asyncio.sleep(3)
+            except Exception as e:
+                print(f"  Ошибка {ch['username']}: {e}")
+        save_seen(seen)
+        print("Жду 5 мин...\n")
+        await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run())
