@@ -90,7 +90,7 @@ def push_to_api(news_items):
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             result = json.loads(r.read())
-            print(f"  Отправлено в кабинет: {result}")
+            print(f"  Сохранено в БД: {result}")
     except Exception as e:
         print(f"  Ошибка отправки в API: {e}")
 
@@ -147,7 +147,6 @@ async def run():
             except Exception as e:
                 print(f"  Ошибка {ch['username']}: {e}")
 
-        # Отправляем все новые новости в кабинет
         if all_new_items:
             push_to_api(all_new_items)
 
