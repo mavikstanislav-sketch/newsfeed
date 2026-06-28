@@ -21,7 +21,7 @@ CHANNELS = [
     {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
 ]
 
-CHECK_INTERVAL = 300
+CHECK_INTERVAL = 60
 SEEN_FILE = "seen_news.json"
 
 def clean_html(text):
