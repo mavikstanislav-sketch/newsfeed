@@ -9,6 +9,7 @@ import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
+NEWS_FILE = "news_cache.json"
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -25,6 +26,10 @@ def clean_html(text):
     text = re.sub(r'<[^>]+>', '', text)
     return unescape(text).strip()
 
+def get_image(html):
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html or '')
+    return match.group(1) if match else None
+
 def make_id(url, title):
     return hashlib.md5((url + title).encode()).hexdigest()[:16]
 
@@ -38,6 +43,16 @@ def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
 
+def load_cache():
+    if os.path.exists(NEWS_FILE):
+        with open(NEWS_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_cache(news):
+    with open(NEWS_FILE, "w") as f:
+        json.dump(news[-100:], f, ensure_ascii=False)
+
 def fetch_news(channel):
     urls = [
         f"https://tg.i-c-a.su/rss/{channel['username']}",
@@ -48,18 +63,24 @@ def fetch_news(channel):
             feed = feedparser.parse(url)
             if feed.entries:
                 items = []
-                for entry in feed.entries[:3]:
+                for entry in feed.entries[:5]:
+                    desc = entry.get("summary", "") or entry.get("description", "")
+                    img = get_image(desc)
                     title = clean_html(entry.get("title", ""))
-                    body  = clean_html(entry.get("summary", ""))
-                    link  = entry.get("link", "")
+                    body = clean_html(desc)
+                    link = entry.get("link", "")
                     if len(title) < 5 and len(body) < 10:
                         continue
                     items.append({
                         "id": make_id(link, title),
+                        "ch": channel["username"],
+                        "name": channel["name"],
+                        "emoji": channel["emoji"],
                         "title": title[:300],
                         "body": body[:600],
+                        "img": img,
                         "link": link,
-                        "channel": channel,
+                        "time": entry.get("published", ""),
                     })
                 return items
         except Exception as e:
@@ -92,13 +113,25 @@ async def run():
 
     while True:
         print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
+        all_news = load_cache()
+        existing_ids = {n["id"] for n in all_news}
+        new_for_cache = []
+
         for ch in CHANNELS:
             try:
                 items = fetch_news(ch)
                 new_items = [i for i in items if i["id"] not in seen]
+                
+                # Добавляем в кеш все свежие новости
+                for item in items:
+                    if item["id"] not in existing_ids:
+                        new_for_cache.append(item)
+                        existing_ids.add(item["id"])
+
                 if not new_items:
                     print(f"  - @{ch['username']}: нет новых")
                     continue
+                    
                 print(f"  + @{ch['username']}: {len(new_items)} новых")
                 for item in new_items[:2]:
                     msg = (
@@ -113,6 +146,13 @@ async def run():
                     await asyncio.sleep(3)
             except Exception as e:
                 print(f"  Ошибка {ch['username']}: {e}")
+
+        # Сохраняем обновлённый кеш
+        if new_for_cache:
+            all_news = new_for_cache + all_news
+            save_cache(all_news)
+            print(f"  Кеш обновлён: {len(all_news)} новостей")
+
         save_seen(seen)
         print("Жду 5 мин...\n")
         await asyncio.sleep(CHECK_INTERVAL)
