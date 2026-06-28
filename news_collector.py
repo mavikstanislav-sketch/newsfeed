@@ -10,7 +10,7 @@ import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
-ANTHROPIC_API_KEY  = "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"
+ANTHROPIC_API_KEY  = "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"
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -42,8 +42,8 @@ def save_seen(seen):
 
 def fetch_news(channel):
     urls = [
-        f"https://rsshub.app/telegram/channel/{channel['username']}",
         f"https://tg.i-c-a.su/rss/{channel['username']}",
+        f"https://rsshub.app/telegram/channel/{channel['username']}",
     ]
     for url in urls:
         try:
