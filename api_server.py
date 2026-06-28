@@ -36,10 +36,12 @@ def fetch_channel(ch):
     ]
     for url in urls:
         try:
-            feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
+            feed = feedparser.parse(url, request_headers={
+                'User-Agent': 'Mozilla/5.0',
+            })
             if feed.entries:
                 items = []
-                for entry in feed.entries[:5]:
+                for entry in feed.entries[:10]:
                     desc = entry.get("summary", "") or entry.get("description", "")
                     img = get_image(desc)
                     text = clean_html(desc)
@@ -69,13 +71,10 @@ def root():
 
 @app.get("/news")
 def get_news():
-    # Параллельная загрузка всех каналов
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(fetch_channel, CHANNELS))
-    
     all_news = []
     for items in results:
         all_news.extend(items)
-    
     print(f"Загружено новостей: {len(all_news)}")
     return {"news": all_news, "total": len(all_news)}
