@@ -781,11 +781,10 @@ async function loadFeed(){
 function refresh(){loadFeed();}
 loadFeed();
 
-// Автообновление каждые 2 минуты
+// Автообновление каждые 30 секунд
 setInterval(()=>{
   loadFeed();
-  showT('Лента обновлена ✓');
-}, 2 * 60 * 1000);
+}, 30 * 1000);
 </script>
 </body>
 </html>
