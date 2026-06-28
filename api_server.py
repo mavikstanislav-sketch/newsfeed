@@ -4,6 +4,9 @@ import feedparser
 import re
 from html import unescape
 from concurrent.futures import ThreadPoolExecutor
+import os
+import psycopg2
+import json
 
 app = FastAPI()
 app.add_middleware(
@@ -13,6 +16,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
     {"username": "vach_govorit",  "name": "Вач говорит",   "emoji": "🎙"},
@@ -21,8 +26,37 @@ CHANNELS = [
     {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
 ]
 
-# Хранилище новостей в памяти
-news_store = []
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
+def init_db():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS news (
+                id TEXT PRIMARY KEY,
+                ch TEXT,
+                name TEXT,
+                emoji TEXT,
+                title TEXT,
+                body TEXT,
+                img TEXT,
+                link TEXT,
+                time TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("БД инициализирована!")
+    except Exception as e:
+        print(f"Ошибка БД: {e}")
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 def clean_html(text):
     text = re.sub(r'<[^>]+>', '', text)
@@ -72,40 +106,63 @@ def root():
 
 @app.post("/push")
 def push_news(data: dict):
-    global news_store
     new_items = data.get("news", [])
-    if new_items:
-        existing_ids = {n["id"] for n in news_store}
-        added = 0
+    added = 0
+    try:
+        conn = get_db()
+        cur = conn.cursor()
         for item in new_items:
-            if item["id"] not in existing_ids:
-                news_store.insert(0, item)
-                existing_ids.add(item["id"])
+            cur.execute("""
+                INSERT INTO news (id, ch, name, emoji, title, body, img, link, time)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                item.get("id"), item.get("ch"), item.get("name"),
+                item.get("emoji"), item.get("title"), item.get("body"),
+                item.get("img"), item.get("link"), item.get("time")
+            ))
+            if cur.rowcount > 0:
                 added += 1
-        # Сортируем по времени — новые вверху
-        from datetime import datetime
-        def parse_time(item):
-            try:
-                from email.utils import parsedate_to_datetime
-                return parsedate_to_datetime(item.get("time", ""))
-            except:
-                return datetime.min
-        news_store.sort(key=parse_time, reverse=True)
-        news_store[:] = news_store[:100]
-        print(f"Получено от бота: {added} новых новостей, всего: {len(news_store)}")
-    return {"ok": True, "total": len(news_store)}
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Сохранено в БД: {added} новых")
+    except Exception as e:
+        print(f"Ошибка push: {e}")
+    return {"ok": True, "added": added}
 
 @app.get("/news")
 def get_news():
-    if news_store:
-        print(f"Отдаём из памяти: {len(news_store)} новостей")
-        return {"news": news_store, "total": len(news_store)}
-    
-    print("Память пуста, парсим RSS...")
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, ch, name, emoji, title, body, img, link, time
+            FROM news
+            ORDER BY created_at DESC
+            LIMIT 50
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        if rows:
+            news = []
+            for row in rows:
+                news.append({
+                    "id": row[0], "ch": row[1], "name": row[2],
+                    "emoji": row[3], "title": row[4], "body": row[5],
+                    "img": row[6], "link": row[7], "time": row[8]
+                })
+            print(f"Отдаём из БД: {len(news)} новостей")
+            return {"news": news, "total": len(news)}
+    except Exception as e:
+        print(f"Ошибка чтения БД: {e}")
+
+    # Резервный вариант — RSS
+    print("БД недоступна, парсим RSS...")
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(fetch_channel, CHANNELS))
     all_news = []
     for items in results:
         all_news.extend(items)
-    print(f"Загружено: {len(all_news)}")
     return {"news": all_news, "total": len(all_news)}
