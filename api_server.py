@@ -27,7 +27,10 @@ CHANNELS = [
 ]
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    url = DATABASE_URL
+    if url and "sslmode" not in url:
+        url += "?sslmode=require"
+    return psycopg2.connect(url)
 
 def init_db():
     try:
