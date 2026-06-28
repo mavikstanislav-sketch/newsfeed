@@ -1,14 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
-import asyncio
-import os
-import base64
-import hashlib
-
-API_ID = 37103823
-API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
+import feedparser
+import re
+from html import unescape
 
 app = FastAPI()
 app.add_middleware(
@@ -26,76 +20,56 @@ CHANNELS = [
     {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
 ]
 
-client = TelegramClient("session", API_ID, API_HASH)
+def clean_html(text):
+    text = re.sub(r'<[^>]+>', '', text)
+    return unescape(text).strip()
 
-@app.on_event("startup")
-async def startup():
-    await client.start()
-
-@app.on_event("shutdown")
-async def shutdown():
-    await client.disconnect()
+def get_image(html):
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html or '')
+    return match.group(1) if match else None
 
 @app.get("/")
 def root():
-    return {"status": "NewsFeed API с медиа работает!"}
+    return {"status": "NewsFeed API работает!"}
 
 @app.get("/news")
-async def get_news():
+def get_news():
     all_news = []
     for ch in CHANNELS:
         try:
-            entity = await client.get_entity(ch["username"])
-            messages = await client.get_messages(entity, limit=5)
-            for msg in messages:
-                if not msg.text and not msg.message:
+            urls = [
+                f"https://tg.i-c-a.su/rss/{ch['username']}",
+                f"https://rsshub.app/telegram/channel/{ch['username']}",
+            ]
+            for url in urls:
+                try:
+                    feed = feedparser.parse(url, request_headers={
+                        'User-Agent': 'Mozilla/5.0 NewsFeedBot/1.0'
+                    })
+                    if feed.entries:
+                        for entry in feed.entries[:5]:
+                            desc = entry.get("summary", "") or entry.get("description", "")
+                            img = get_image(desc)
+                            text = clean_html(desc)
+                            title = clean_html(entry.get("title", ""))
+                            if not title and not text:
+                                continue
+                            all_news.append({
+                                "id": entry.get("id", entry.get("link", ""))[-20:],
+                                "ch": ch["username"],
+                                "name": ch["name"],
+                                "emoji": ch["emoji"],
+                                "title": title[:200],
+                                "body": text[:600],
+                                "img": img,
+                                "link": entry.get("link", ""),
+                                "time": entry.get("published", ""),
+                            })
+                        break
+                except Exception as e:
+                    print(f"Ошибка URL {url}: {e}")
                     continue
-                text = msg.message or msg.text or ""
-                if len(text) < 10:
-                    continue
-
-                img_url = None
-                media_type = None
-
-                # Фото
-                if isinstance(msg.media, MessageMediaPhoto):
-                    try:
-                        photo_bytes = await client.download_media(msg.media, bytes)
-                        img_b64 = base64.b64encode(photo_bytes).decode()
-                        img_url = f"data:image/jpeg;base64,{img_b64}"
-                        media_type = "photo"
-                    except:
-                        pass
-
-                # Видео
-                elif isinstance(msg.media, MessageMediaDocument):
-                    if msg.media.document.mime_type.startswith("video"):
-                        media_type = "video"
-                        # для видео берём превью если есть
-                        try:
-                            thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
-                            if thumb_bytes:
-                                thumb_b64 = base64.b64encode(thumb_bytes).decode()
-                                img_url = f"data:image/jpeg;base64,{thumb_b64}"
-                        except:
-                            pass
-
-                msg_id = hashlib.md5(f"{ch['username']}{msg.id}".encode()).hexdigest()[:16]
-
-                all_news.append({
-                    "id": msg_id,
-                    "ch": ch["username"],
-                    "name": ch["name"],
-                    "emoji": ch["emoji"],
-                    "title": text[:100].split('\n')[0],
-                    "body": text[:600],
-                    "img": img_url,
-                    "media_type": media_type,
-                    "link": f"https://t.me/{ch['username']}/{msg.id}",
-                    "time": msg.date.isoformat() if msg.date else "",
-                })
         except Exception as e:
-            print(f"Ошибка {ch['username']}: {e}")
-
+            print(f"Ошибка канала {ch['username']}: {e}")
     print(f"Загружено новостей: {len(all_news)}")
     return {"news": all_news, "total": len(all_news)}
