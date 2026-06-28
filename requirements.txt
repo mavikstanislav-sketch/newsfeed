@@ -2,4 +2,3 @@ feedparser
 anthropic
 fastapi
 uvicorn
-httpx
