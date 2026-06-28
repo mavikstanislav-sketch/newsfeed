@@ -33,11 +33,12 @@ def fetch_channel(ch):
     urls = [
         f"https://tg.i-c-a.su/rss/{ch['username']}",
         f"https://rsshub.app/telegram/channel/{ch['username']}",
+        f"https://rss.app/feeds/telegram/{ch['username']}.xml",
     ]
     for url in urls:
         try:
             feed = feedparser.parse(url, request_headers={
-                'User-Agent': 'Mozilla/5.0',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             })
             if feed.entries:
                 items = []
@@ -60,9 +61,10 @@ def fetch_channel(ch):
                         "time": entry.get("published", ""),
                     })
                 if items:
+                    print(f"OK {ch['username']} from {url}: {len(items)} posts")
                     return items
         except Exception as e:
-            print(f"Error {ch['username']}: {e}")
+            print(f"Error {ch['username']} {url}: {e}")
     return []
 
 @app.get("/")
