@@ -10,7 +10,7 @@ import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
-ANTHROPIC_API_KEY  = "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"
+ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -95,6 +95,7 @@ async def send_tg(text):
 async def run():
     seen = load_seen()
     print("Бот запущен!")
+    print(f"API Key: {'OK' if ANTHROPIC_API_KEY else 'НЕТ КЛЮЧА!'}")
 
     try:
         await send_tg("✅ <b>NewsFeed бот запущен на сервере!</b>\n\nРаботаю 24/7 без вашего ПК!\n\n" +
