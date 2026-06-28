@@ -4,8 +4,6 @@ import feedparser
 import re
 from html import unescape
 from concurrent.futures import ThreadPoolExecutor
-import json
-import os
 
 app = FastAPI()
 app.add_middleware(
@@ -23,7 +21,8 @@ CHANNELS = [
     {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
 ]
 
-NEWS_FILE = "news_cache.json"
+# Хранилище новостей в памяти
+news_store = []
 
 def clean_html(text):
     text = re.sub(r'<[^>]+>', '', text)
@@ -71,25 +70,33 @@ def fetch_channel(ch):
 def root():
     return {"status": "NewsFeed API работает!"}
 
+@app.post("/push")
+def push_news(data: dict):
+    global news_store
+    new_items = data.get("news", [])
+    if new_items:
+        existing_ids = {n["id"] for n in news_store}
+        added = 0
+        for item in new_items:
+            if item["id"] not in existing_ids:
+                news_store.insert(0, item)
+                existing_ids.add(item["id"])
+                added += 1
+        news_store = news_store[:100]
+        print(f"Получено от бота: {added} новых новостей, всего: {len(news_store)}")
+    return {"ok": True, "total": len(news_store)}
+
 @app.get("/news")
 def get_news():
-    # Сначала пробуем взять из кеша (собранного ботом)
-    if os.path.exists(NEWS_FILE):
-        try:
-            with open(NEWS_FILE, "r") as f:
-                cached = json.load(f)
-            if cached:
-                print(f"Отдаём из кеша: {len(cached)} новостей")
-                return {"news": cached, "total": len(cached), "source": "cache"}
-        except:
-            pass
-
-    # Если кеша нет — парсим сами
-    print("Кеш пустой, парсим RSS...")
+    if news_store:
+        print(f"Отдаём из памяти: {len(news_store)} новостей")
+        return {"news": news_store, "total": len(news_store)}
+    
+    print("Память пуста, парсим RSS...")
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(fetch_channel, CHANNELS))
     all_news = []
     for items in results:
         all_news.extend(items)
-    print(f"Загружено новостей: {len(all_news)}")
-    return {"news": all_news, "total": len(all_news), "source": "rss"}
+    print(f"Загружено: {len(all_news)}")
+    return {"news": all_news, "total": len(all_news)}
