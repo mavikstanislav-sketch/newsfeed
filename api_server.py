@@ -82,7 +82,16 @@ def push_news(data: dict):
                 news_store.insert(0, item)
                 existing_ids.add(item["id"])
                 added += 1
-        news_store = news_store[:100]
+        # Сортируем по времени — новые вверху
+        from datetime import datetime
+        def parse_time(item):
+            try:
+                from email.utils import parsedate_to_datetime
+                return parsedate_to_datetime(item.get("time", ""))
+            except:
+                return datetime.min
+        news_store.sort(key=parse_time, reverse=True)
+        news_store[:] = news_store[:100]
         print(f"Получено от бота: {added} новых новостей, всего: {len(news_store)}")
     return {"ok": True, "total": len(news_store)}
 
