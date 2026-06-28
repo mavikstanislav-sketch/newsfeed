@@ -6,10 +6,12 @@ import hashlib
 from datetime import datetime
 from html import unescape
 import re
+import urllib.request
+import urllib.parse
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
-NEWS_FILE = "news_cache.json"
+API_URL = "https://newsfeed-production-9b3b.up.railway.app"
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -42,16 +44,6 @@ def load_seen():
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
-
-def load_cache():
-    if os.path.exists(NEWS_FILE):
-        with open(NEWS_FILE, "r") as f:
-            return json.load(f)
-    return []
-
-def save_cache(news):
-    with open(NEWS_FILE, "w") as f:
-        json.dump(news[-100:], f, ensure_ascii=False)
 
 def fetch_news(channel):
     urls = [
@@ -87,8 +79,22 @@ def fetch_news(channel):
             print(f"    ошибка: {e}")
     return []
 
+def push_to_api(news_items):
+    try:
+        data = json.dumps({"news": news_items}).encode()
+        req = urllib.request.Request(
+            f"{API_URL}/push",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            result = json.loads(r.read())
+            print(f"  Отправлено в кабинет: {result}")
+    except Exception as e:
+        print(f"  Ошибка отправки в API: {e}")
+
 async def send_tg(text):
-    import urllib.request, urllib.parse
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = urllib.parse.urlencode({
         "chat_id": TELEGRAM_CHAT_ID,
@@ -113,26 +119,20 @@ async def run():
 
     while True:
         print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
-        all_news = load_cache()
-        existing_ids = {n["id"] for n in all_news}
-        new_for_cache = []
+        all_new_items = []
 
         for ch in CHANNELS:
             try:
                 items = fetch_news(ch)
                 new_items = [i for i in items if i["id"] not in seen]
-                
-                # Добавляем в кеш все свежие новости
-                for item in items:
-                    if item["id"] not in existing_ids:
-                        new_for_cache.append(item)
-                        existing_ids.add(item["id"])
 
                 if not new_items:
                     print(f"  - @{ch['username']}: нет новых")
                     continue
-                    
+
                 print(f"  + @{ch['username']}: {len(new_items)} новых")
+                all_new_items.extend(new_items)
+
                 for item in new_items[:2]:
                     msg = (
                         f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
@@ -147,11 +147,9 @@ async def run():
             except Exception as e:
                 print(f"  Ошибка {ch['username']}: {e}")
 
-        # Сохраняем обновлённый кеш
-        if new_for_cache:
-            all_news = new_for_cache + all_news
-            save_cache(all_news)
-            print(f"  Кеш обновлён: {len(all_news)} новостей")
+        # Отправляем все новые новости в кабинет
+        if all_new_items:
+            push_to_api(all_new_items)
 
         save_seen(seen)
         print("Жду 5 мин...\n")
