@@ -2,8 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#17212b">
 <title>NewsFeed</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -13,9 +15,21 @@
   --green:#4dcd5e;--red:#e05555;--orange:#ff8c42;--pink:#ff6b9d;
   --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
   --sans:'Inter',system-ui,sans-serif;
+  --tg-safe-top: env(safe-area-inset-top, 0px);
+  --tg-safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+html{overscroll-behavior:none;height:100%}
+body{
+  font-family:var(--sans);background:var(--bg);color:var(--text);
+  min-height:100vh;height:100%;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+  -webkit-overflow-scrolling:touch;
+  /* убираем синюю полоску Telegram */
+  padding-top:var(--tg-safe-top);
+  padding-bottom:var(--tg-safe-bottom);
+}
 .layout{display:flex;min-height:100vh}
 
 .sidebar{width:260px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:10}
@@ -62,14 +76,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .page{display:none;flex:1}
 .page.active{display:block}
 
-/* FILTER */
 .filter-bar{position:sticky;top:54px;z-index:4;background:var(--bg);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;gap:6px;overflow-x:auto}
 .filter-bar::-webkit-scrollbar{display:none}
 .chip{padding:5px 14px;border-radius:16px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:var(--s2);color:var(--t2);transition:all 0.15s;white-space:nowrap;flex-shrink:0}
 .chip:hover{background:var(--s3);color:var(--text)}
 .chip.on{background:var(--blue);color:#fff}
 
-/* FEED */
 .msg-wrap{padding:8px 16px 24px}
 .msg-date{text-align:center;margin:12px 0}
 .msg-date span{background:rgba(23,33,43,0.9);color:var(--t2);font-size:12px;padding:4px 12px;border-radius:12px}
@@ -84,27 +96,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .expand-btn{font-size:12px;color:var(--blue);cursor:pointer;background:none;border:none;font-family:var(--sans);padding:4px 0 0;display:block}
 .expand-btn:hover{color:var(--blue2)}
 
-/* МЕДИА */
 .msg-media{margin:8px 0;border-radius:10px;overflow:hidden;position:relative}
 .msg-media img{width:100%;max-height:280px;object-fit:cover;display:block;border-radius:10px}
-.msg-media-video{
-  width:100%;aspect-ratio:16/9;
-  background:var(--s3);border-radius:10px;
-  display:flex;align-items:center;justify-content:center;
-  cursor:pointer;position:relative;overflow:hidden;
-}
+.msg-media-video{width:100%;aspect-ratio:16/9;background:var(--s3);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden}
 .msg-media-video img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
-.play-btn{
-  width:52px;height:52px;border-radius:50%;
-  background:rgba(0,0,0,0.65);
-  display:flex;align-items:center;justify-content:center;
-  position:relative;z-index:1;
-  border:2px solid rgba(255,255,255,0.3);
-}
+.play-btn{width:52px;height:52px;border-radius:50%;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;position:relative;z-index:1;border:2px solid rgba(255,255,255,0.3)}
 .play-btn svg{width:20px;height:20px;fill:#fff;margin-left:3px}
 .video-label{position:absolute;bottom:8px;left:10px;z-index:1;font-size:11px;color:#fff;background:rgba(0,0,0,0.5);padding:2px 8px;border-radius:10px}
 
-/* AI */
 .msg-ai{margin-top:8px;padding:8px 10px;background:rgba(43,157,221,0.08);border-left:3px solid var(--blue);border-radius:0 6px 6px 0}
 .msg-ai-label{font-size:11px;font-weight:600;color:var(--blue2);margin-bottom:4px;display:flex;align-items:center;gap:5px}
 .msg-ai-label svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
@@ -114,17 +113,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .dots span:nth-child(2){animation-delay:0.2s}.dots span:nth-child(3){animation-delay:0.4s}
 @keyframes blink{0%,80%,100%{opacity:0.2}40%{opacity:1}}
 
-/* РЕАКЦИИ + ФУТЕР */
 .msg-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:6px}
 .msg-time{font-size:11px;color:var(--t4)}
 .reactions{display:flex;gap:4px}
-.react-btn{
-  display:flex;align-items:center;gap:3px;
-  padding:3px 9px;border-radius:12px;
-  background:var(--s3);border:1px solid transparent;
-  font-size:13px;cursor:pointer;transition:all 0.15s;
-  color:var(--t2);
-}
+.react-btn{display:flex;align-items:center;gap:3px;padding:3px 9px;border-radius:12px;background:var(--s3);border:1px solid transparent;font-size:13px;cursor:pointer;transition:all 0.15s;color:var(--t2)}
 .react-btn:hover{background:var(--s4);border-color:var(--border2)}
 .react-btn.active-like{background:rgba(43,157,221,0.2);border-color:var(--blue);color:var(--blue2)}
 .react-btn.active-fire{background:rgba(255,140,66,0.2);border-color:var(--orange);color:var(--orange)}
@@ -139,7 +131,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .btn-save svg{width:16px;height:16px;stroke:var(--t3);fill:none;stroke-width:2;transition:all 0.15s}
 .btn-save.saved svg{stroke:#f4c542;fill:#f4c542}
 
-/* SECTION PAGES */
 .ch-section{padding:16px;border-bottom:1px solid var(--border)}
 .ch-section-title{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px}
 .add-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -163,7 +154,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .btn-del:hover{background:rgba(224,85,85,0.12);color:var(--red)}
 .btn-del svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
 
-/* FRIENDS */
 .fr-item{display:flex;align-items:center;gap:12px;padding:10px 16px;transition:background 0.1s}
 .fr-item:hover{background:var(--s2)}
 .fr-av{width:44px;height:44px;border-radius:50%;background:var(--s4);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
@@ -173,7 +163,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .btn-send-tg{padding:6px 12px;border-radius:16px;background:var(--s4);border:none;font-size:12px;font-weight:500;font-family:var(--sans);color:var(--blue2);cursor:pointer}
 .btn-send-tg:hover{opacity:0.8}
 
-/* SETTINGS */
 .set-section{border-bottom:1px solid var(--border);padding:16px}
 .set-title{font-size:12px;font-weight:600;color:var(--blue2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px}
 .set-field{margin-bottom:12px}
@@ -182,8 +171,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .set-inp::placeholder{color:var(--t3)}
 .set-inp:focus{border-color:var(--blue)}
 select.set-inp{cursor:pointer}
-.btn-save{width:100%;padding:11px;background:var(--blue);border:none;border-radius:10px;font-size:14px;font-weight:500;font-family:var(--sans);color:#fff;cursor:pointer;margin-top:4px}
-.btn-save:hover{opacity:0.85}
+.btn-save-set{width:100%;padding:11px;background:var(--blue);border:none;border-radius:10px;font-size:14px;font-weight:500;font-family:var(--sans);color:#fff;cursor:pointer;margin-top:4px}
+.btn-save-set:hover{opacity:0.85}
 .saved-ok{margin-top:10px;padding:10px 13px;background:rgba(77,205,94,0.1);border-radius:10px;font-size:13px;color:var(--green);display:none;align-items:center;gap:7px}
 .saved-ok svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.5}
 .set-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
@@ -191,7 +180,6 @@ select.set-inp{cursor:pointer}
 .set-row-l{font-size:14px}
 .set-row-s{font-size:12px;color:var(--t3);margin-top:3px}
 
-/* ПРОФИЛЬ */
 .profile-hero{background:linear-gradient(180deg,var(--s4) 0%,var(--s1) 100%);padding:32px 16px 20px;display:flex;flex-direction:column;align-items:center;text-align:center}
 .profile-big-av{width:90px;height:90px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:40px;border:3px solid var(--blue);margin-bottom:12px;position:relative;cursor:pointer;overflow:hidden}
 .profile-big-av img{width:100%;height:100%;object-fit:cover}
@@ -206,23 +194,19 @@ select.set-inp{cursor:pointer}
 .p-stat-n{font-size:20px;font-weight:700;color:var(--blue2)}
 .p-stat-l{font-size:11px;color:var(--t3);margin-top:2px}
 
-/* ИЗБРАННОЕ */
 .fav-empty{text-align:center;padding:60px 20px;color:var(--t3)}
 .fav-empty .big-emoji{font-size:48px;display:block;margin-bottom:14px}
 .fav-empty p{font-size:15px;color:var(--t2);margin-bottom:6px;font-weight:500}
 .fav-empty span{font-size:13px}
 
-/* EMPTY */
 .empty{text-align:center;padding:48px 20px;color:var(--t3)}
 .empty svg{width:40px;height:40px;stroke:var(--t4);fill:none;stroke-width:1.5;margin-bottom:14px;display:block;margin-left:auto;margin-right:auto}
 .empty-t{font-size:15px;font-weight:500;color:var(--t2);margin-bottom:6px}
 .empty-s{font-size:13px}
 
-/* TOAST */
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--s3);border-radius:10px;padding:10px 18px;font-size:13px;color:var(--text);z-index:999;opacity:0;transition:opacity 0.2s;white-space:nowrap;pointer-events:none}
+.toast{position:fixed;bottom:calc(20px + var(--tg-safe-bottom));left:50%;transform:translateX(-50%);background:var(--s3);border-radius:10px;padding:10px 18px;font-size:13px;color:var(--text);z-index:999;opacity:0;transition:opacity 0.2s;white-space:nowrap;pointer-events:none}
 .toast.show{opacity:1}
 
-/* REACT ANIM */
 @keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.4)}100%{transform:scale(1)}}
 .pop{animation:pop 0.3s ease}
 
@@ -306,18 +290,15 @@ select.set-inp{cursor:pointer}
     </div>
   </div>
 
-  <!-- ЛЕНТА -->
   <div class="page active" id="page-feed">
     <div class="filter-bar" id="filter-bar"></div>
     <div class="msg-wrap" id="feed-list"></div>
   </div>
 
-  <!-- ИЗБРАННОЕ -->
   <div class="page" id="page-fav">
     <div class="msg-wrap" id="fav-list"></div>
   </div>
 
-  <!-- КАНАЛЫ -->
   <div class="page" id="page-channels">
     <div class="ch-section">
       <div class="ch-section-title">Добавить канал</div>
@@ -331,7 +312,6 @@ select.set-inp{cursor:pointer}
     <div id="ch-list"></div>
   </div>
 
-  <!-- ДРУЗЬЯ -->
   <div class="page" id="page-friends">
     <div class="ch-section">
       <div class="ch-section-title">Добавить друга</div>
@@ -344,7 +324,6 @@ select.set-inp{cursor:pointer}
     <div id="fr-list"></div>
   </div>
 
-  <!-- ПРОФИЛЬ -->
   <div class="page" id="page-profile">
     <div class="profile-hero">
       <div class="profile-big-av" onclick="document.getElementById('avatar-input').click()">
@@ -364,17 +343,16 @@ select.set-inp{cursor:pointer}
     <div class="ch-section">
       <div class="ch-section-title">Настройки профиля</div>
       <div class="set-field"><label class="set-label">Имя кабинета</label><input class="set-inp" id="prof-name" placeholder="Мой кабинет"></div>
-      <button class="btn-save" onclick="savePro()">Сохранить</button>
+      <button class="btn-save-set" onclick="savePro()">Сохранить</button>
     </div>
   </div>
 
-  <!-- НАСТРОЙКИ -->
   <div class="page" id="page-settings">
     <div class="set-section">
       <div class="set-title">API ключи</div>
       <div class="set-field"><label class="set-label">Claude API Key</label><input class="set-inp" id="sk" type="password" placeholder="sk-ant-..."></div>
       <div class="set-field"><label class="set-label">Telegram Bot Token</label><input class="set-inp" id="st" type="password" placeholder="123456:ABC..."></div>
-      <button class="btn-save" onclick="saveS()">Сохранить</button>
+      <button class="btn-save-set" onclick="saveS()">Сохранить</button>
       <div class="saved-ok" id="saved"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Сохранено!</div>
     </div>
     <div class="set-section">
@@ -397,6 +375,19 @@ select.set-inp{cursor:pointer}
 <div class="toast" id="toast"></div>
 
 <script>
+// ===== TELEGRAM WEBAPP INIT =====
+(function(){
+  if(window.Telegram && window.Telegram.WebApp){
+    const tg=window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+    tg.setHeaderColor('#17212b');
+    tg.setBackgroundColor('#0e1117');
+    // убираем кнопку закрытия если не нужна
+    tg.MainButton.hide();
+  }
+})();
+
 let channels=JSON.parse(localStorage.getItem('nf_ch')||'null')||[
   {id:1,username:'ssternenko',name:'Стерненко',emoji:'🇺🇦',on:true},
   {id:2,username:'vach_govorit',name:'Вач говорит',emoji:'🎙',on:true},
@@ -527,8 +518,6 @@ function buildCard(item,inFav){
   const isSaved=favorites.some(f=>f.id===item.id);
   const ur=userReacts[item.id]||{};
   const reactions=item.reactions||{like:0,fire:0,heart:0};
-
-  // медиа
   let mediaHtml='';
   if(item.media){
     if(item.media.type==='photo'){
@@ -541,9 +530,7 @@ function buildCard(item,inFav){
       </div></div>`;
     }
   }
-
   const sendBtns=friends.length?friends.map(f=>`<button class="msg-btn" onclick="sTF(${item.id},'${f.tgId}','${f.name}')"><svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>${f.name}</button>`).join(''):'';
-
   return `
     <div class="msg-channel">${item.emoji} @${item.ch}</div>
     <div class="msg-title">${item.title}</div>
@@ -619,13 +606,9 @@ function toggleFav(id){
   const item=news.find(n=>n.id===id)||favorites.find(n=>n.id===id);
   if(!item)return;
   const idx=favorites.findIndex(f=>f.id===id);
-  if(idx>=0){
-    favorites.splice(idx,1);showT('Убрано из избранного');
-  } else {
-    favorites.push({...item});showT('Добавлено в избранное ⭐');
-  }
+  if(idx>=0){favorites.splice(idx,1);showT('Убрано из избранного');}
+  else{favorites.push({...item});showT('Добавлено в избранное ⭐');}
   localStorage.setItem('nf_fav',JSON.stringify(favorites));
-  // обновляем кнопки везде
   document.querySelectorAll('#bs-'+id).forEach(btn=>{
     btn.classList.toggle('saved',favorites.some(f=>f.id===id));
   });
@@ -641,14 +624,10 @@ function react(id,type){
   if(!btn||!cnt)return;
   const activeClass='active-'+type;
   if(userReacts[id][type]){
-    userReacts[id][type]=false;
-    item.reactions[type]--;
-    btn.classList.remove(activeClass);
+    userReacts[id][type]=false;item.reactions[type]--;btn.classList.remove(activeClass);
   } else {
-    userReacts[id][type]=true;
-    item.reactions[type]++;
-    btn.classList.add(activeClass);
-    btn.classList.add('pop');
+    userReacts[id][type]=true;item.reactions[type]++;
+    btn.classList.add(activeClass);btn.classList.add('pop');
     setTimeout(()=>btn.classList.remove('pop'),300);
   }
   cnt.textContent=item.reactions[type];
@@ -727,7 +706,6 @@ function rCh(){
     l.appendChild(el);
   });
 }
-
 function addCh(){
   const u=document.getElementById('cu').value.trim().replace('@','').toLowerCase();
   const n=document.getElementById('cn').value.trim();
@@ -806,7 +784,6 @@ function savePro(){
 function mk(t,c){const el=document.createElement(t);el.className=c;return el;}
 function showT(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
-// INIT
 if(profile.avatar)applyAvatar();
 document.getElementById('sidebar-name').textContent=profile.name||'Мой кабинет';
 document.getElementById('profile-uname').textContent=profile.name||'Мой кабинет';
