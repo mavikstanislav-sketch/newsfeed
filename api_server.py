@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("PG_URL", "")
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
