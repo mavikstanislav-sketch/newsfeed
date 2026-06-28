@@ -505,7 +505,7 @@ function buildCard(item,inFav){
     ${mediaHtml}
     <div class="msg-body${item.exp?' exp':''}" id="b${item.id}">${item.body}</div>
     <button class="expand-btn" onclick="exp(${item.id})">${item.exp?'Свернуть ▲':'Читать полностью ▼'}</button>
-    <div class="msg-ai" id="ai${item.id}">${aHtml(item)}</div>
+
     <div class="msg-foot">
       <span class="msg-time">${item.time}</span>
       <div class="reactions">
@@ -613,9 +613,7 @@ function playVideo(el){
 
 function aHtml(item){
   if(item.ai)return`<div class="msg-ai-label"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>Комментарий AI</div><div class="msg-ai-txt">${item.ai}</div>`;
-  if(!aiOn)return`<div class="msg-ai-txt" style="color:var(--t4);font-size:12px">AI отключён</div>`;
-  if(!settings.claudeKey)return`<div class="msg-ai-txt" style="color:var(--t4);font-size:12px">Добавь Claude API Key в настройках</div>`;
-  return`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t3)"><div class="dots"><span></span><span></span><span></span></div>AI анализирует...</div>`;
+  return '';
 }
 
 async function fAI(item){
