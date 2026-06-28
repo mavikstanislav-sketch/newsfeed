@@ -1,4 +1,4 @@
 feedparser
-anthropic
 fastapi
 uvicorn
+psycopg2-binary
