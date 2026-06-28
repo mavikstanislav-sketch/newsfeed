@@ -403,39 +403,7 @@ let aiOn=settings.ai!==false;
 let sent=parseInt(localStorage.getItem('nf_sent')||'0');
 let filt='all';
 
-const DEMO=[
-  {id:1,ch:'ssternenko',emoji:'🇺🇦',
-   title:'Обмін полоненими: повернули ще 10 українців',
-   body:'Сьогодні відбувся черговий обмін військовополоненими. Додому повернулись 10 захисників України, які перебували в полоні понад рік. Серед звільнених — бійці з різних підрозділів ЗСУ.',
-   time:'12:34',ai:null,exp:false,
-   media:{type:'photo',url:'https://picsum.photos/seed/ukraine1/600/340'},
-   reactions:{like:24,fire:18,heart:31}},
-  {id:2,ch:'vach_govorit',emoji:'🎙',
-   title:'Ситуація на фронті: зведення за добу',
-   body:'Протягом доби відбулось 47 бойових зіткнень. Найгарячіші напрямки — Покровськ та Курахове. ЗСУ відбили всі атаки на Харківщині та Сумщині.',
-   time:'11:20',ai:null,exp:false,
-   media:{type:'video',thumb:'https://picsum.photos/seed/front1/600/340',label:'2:34'},
-   reactions:{like:56,fire:89,heart:12}},
-  {id:3,ch:'truexanewsua',emoji:'📰',
-   title:'Зеленський підписав новий закон про мобілізацію',
-   body:'Президент підписав зміни до закону про мобілізацію. Документ передбачає нові категорії відстрочки та спрощення процедури повернення з-за кордону.',
-   time:'10:05',
-   ai:'Закон давно очікувався суспільством і його підписання — логічний крок. Головне питання тепер у практичній реалізації. Реакція суспільства передбачувано неоднозначна.',
-   exp:false,media:null,reactions:{like:102,fire:45,heart:67}},
-  {id:4,ch:'lachentyt',emoji:'📢',
-   title:'НБУ підвищив облікову ставку до 15,5%',
-   body:'Національний банк України підвищив облікову ставку на 0,5 відсоткового пункту. Рішення пов\'язане з прискоренням інфляції та тиском на гривню.',
-   time:'09:30',ai:null,exp:false,
-   media:{type:'photo',url:'https://picsum.photos/seed/nbu1/600/340'},
-   reactions:{like:33,fire:11,heart:8}},
-  {id:5,ch:'vanek_nikolaev',emoji:'👤',
-   title:'Велика пресконференція: відповіді на головні запитання',
-   body:'Президент відповів на запитання журналістів про стан на фронті, економічну ситуацію та плани на майбутнє. Конференція тривала понад дві години.',
-   time:'08:15',ai:null,exp:false,
-   media:{type:'video',thumb:'https://picsum.photos/seed/conf1/600/340',label:'1:48:20'},
-   reactions:{like:201,fire:156,heart:98}},
-];
-let news=[...DEMO];
+let news=[];
 let userReacts={};
 
 const styles={neutral:'Нейтральний аналітик. 2-3 речення: суть + контекст.',short:'1-2 речення. Тільки найголовніше.',critical:'Критичний погляд. Що тут викликає питання?',simple:'Поясни як другу, простою мовою.'};
@@ -787,7 +755,33 @@ function showT(msg){const t=document.getElementById('toast');t.textContent=msg;t
 if(profile.avatar)applyAvatar();
 document.getElementById('sidebar-name').textContent=profile.name||'Мой кабинет';
 document.getElementById('profile-uname').textContent=profile.name||'Мой кабинет';
-bChips();rFeed();uStats();
+bChips();uStats();
+
+async function loadFeed(){
+  const list=document.getElementById('feed-list');
+  list.innerHTML='<div style="text-align:center;padding:40px;color:var(--t3)"><div style="font-size:32px;margin-bottom:12px">⏳</div>Загружаю новости...</div>';
+  try{
+    const r=await fetch('https://newsfeed-production-9b3b.up.railway.app/news');
+    const d=await r.json();
+    news=d.news.map(item=>({
+      id:item.id,ch:item.ch,emoji:item.emoji,
+      title:item.title||item.body.slice(0,80),
+      body:item.body,
+      time:item.time?new Date(item.time).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}):'',
+      ai:null,exp:false,
+      media:item.img?{type:'photo',url:item.img}:null,
+      link:item.link,
+      reactions:{like:Math.floor(Math.random()*80),fire:Math.floor(Math.random()*50),heart:Math.floor(Math.random()*60)}
+    }));
+    rFeed();
+    showT('Загружено '+news.length+' новостей ✓');
+  }catch(e){
+    list.innerHTML='<div style="text-align:center;padding:40px;color:var(--t3)"><div style="font-size:32px;margin-bottom:12px">❌</div>Ошибка загрузки</div>';
+  }
+}
+
+function refresh(){loadFeed();}
+loadFeed();
 </script>
 </body>
 </html>
