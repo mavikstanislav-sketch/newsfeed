@@ -1,5 +1,5 @@
 feedparser
 anthropic
-telethon
 fastapi
 uvicorn
+httpx
