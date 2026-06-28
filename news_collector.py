@@ -152,7 +152,7 @@ async def run():
             push_to_api(all_new_items)
 
         save_seen(seen)
-        print("Жду 5 мин...\n")
+        print("Жду 1 мин...\n")
         await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
