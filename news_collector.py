@@ -1,6 +1,5 @@
 import asyncio
 import feedparser
-import anthropic
 import json
 import os
 import hashlib
@@ -10,7 +9,6 @@ import re
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
-ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 
 CHANNELS = [
     {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -54,7 +52,7 @@ def fetch_news(channel):
                     title = clean_html(entry.get("title", ""))
                     body  = clean_html(entry.get("summary", ""))
                     link  = entry.get("link", "")
-                    if len(title) < 5:
+                    if len(title) < 5 and len(body) < 10:
                         continue
                     items.append({
                         "id": make_id(link, title),
@@ -67,18 +65,6 @@ def fetch_news(channel):
         except Exception as e:
             print(f"    ошибка: {e}")
     return []
-
-def get_ai_comment(title, body, channel_name):
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=200,
-        messages=[{"role": "user", "content":
-            f"Новость из «{channel_name}»:\n\n{title}\n\n{body}\n\n"
-            "Напиши комментарий 2-3 предложения на русском: суть + мнение. Без вводных слов."
-        }]
-    )
-    return msg.content[0].text.strip()
 
 async def send_tg(text):
     import urllib.request, urllib.parse
@@ -95,10 +81,9 @@ async def send_tg(text):
 async def run():
     seen = load_seen()
     print("Бот запущен!")
-    print(f"API Key: {'OK' if ANTHROPIC_API_KEY else 'НЕТ КЛЮЧА!'}")
 
     try:
-        await send_tg("✅ <b>NewsFeed бот запущен на сервере!</b>\n\nРаботаю 24/7 без вашего ПК!\n\n" +
+        await send_tg("✅ <b>NewsFeed бот запущен!</b>\n\nРаботаю 24/7\n\n" +
             "\n".join(f"{c['emoji']} @{c['username']}" for c in CHANNELS))
         print("Стартовое сообщение отправлено!")
     except Exception as e:
@@ -116,12 +101,11 @@ async def run():
                     continue
                 print(f"  + @{ch['username']}: {len(new_items)} новых")
                 for item in new_items[:2]:
-                    comment = get_ai_comment(item["title"], item["body"], ch["name"])
                     msg = (
                         f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
                         f"<b>{item['title']}</b>\n\n"
                         f"{item['body'][:400]}\n\n"
-                        f"<i>{comment}</i>"
+                        f"<a href='{item['link']}'>Читать в Telegram →</a>"
                     )
                     await send_tg(msg)
                     seen.add(item["id"])
