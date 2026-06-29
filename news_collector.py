@@ -47,7 +47,7 @@ def get_video_duration(msg):
                 return str(secs // 60).zfill(2) + ":" + str(secs % 60).zfill(2)
     except Exception:
         pass
-    return "▶️"
+    return None
 
 def is_video(msg):
     if not isinstance(msg.media, MessageMediaDocument):
@@ -57,29 +57,45 @@ def is_video(msg):
             return True
     return False
 
-async def upload_photo_bytes(img_bytes):
+def get_video_size(msg):
+    try:
+        return msg.media.document.size
+    except Exception:
+        return 999999999
+
+async def upload_to_tg_bot(img_bytes, filetype="photo"):
     try:
         boundary = "boundary789"
+        field = "photo" if filetype == "photo" else "video"
+        filename = "photo.jpg" if filetype == "photo" else "video.mp4"
+        content_type = "image/jpeg" if filetype == "photo" else "video/mp4"
+        endpoint = "sendPhoto" if filetype == "photo" else "sendVideo"
+
         part1 = (
             "--" + boundary + "\r\n"
             + 'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
             + TELEGRAM_CHAT_ID + "\r\n"
             + "--" + boundary + "\r\n"
-            + 'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
-            + "Content-Type: image/jpeg\r\n\r\n"
+            + 'Content-Disposition: form-data; name="' + field + '"; filename="' + filename + '"\r\n'
+            + "Content-Type: " + content_type + "\r\n\r\n"
         ).encode()
         part2 = ("\r\n--" + boundary + "--\r\n").encode()
         body = part1 + img_bytes + part2
+
         req = urllib.request.Request(
-            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendPhoto",
+            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + endpoint,
             data=body,
             headers={"Content-Type": "multipart/form-data; boundary=" + boundary},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             result = json.loads(r.read())
             if result.get("ok"):
-                file_id = result["result"]["photo"][-1]["file_id"]
+                if filetype == "photo":
+                    file_id = result["result"]["photo"][-1]["file_id"]
+                else:
+                    file_id = result["result"]["video"]["file_id"]
+
                 req2 = urllib.request.Request(
                     "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + file_id
                 )
@@ -89,7 +105,7 @@ async def upload_photo_bytes(img_bytes):
                         file_path = file_info["result"]["file_path"]
                         return "https://api.telegram.org/file/bot" + TELEGRAM_BOT_TOKEN + "/" + file_path
     except Exception as e:
-        print("    Ошибка загрузки фото: " + str(e))
+        print("    Ошибка загрузки: " + str(e))
     return None
 
 async def get_photo_url(client, msg):
@@ -97,10 +113,27 @@ async def get_photo_url(client, msg):
         img_bytes = await client.download_media(msg.media, bytes)
         if not img_bytes:
             return None
-        return await upload_photo_bytes(img_bytes)
+        return await upload_to_tg_bot(img_bytes, "photo")
     except Exception as e:
         print("    Ошибка фото: " + str(e))
     return None
+
+async def get_video_url(client, msg):
+    try:
+        size = get_video_size(msg)
+        if size > 19 * 1024 * 1024:
+            print("    Видео слишком большое: " + str(size // 1024 // 1024) + "МБ — пропускаем")
+            # Берём только превью
+            return None, await get_video_thumb(client, msg)
+
+        video_bytes = await client.download_media(msg.media, bytes)
+        if not video_bytes:
+            return None, None
+        url = await upload_to_tg_bot(video_bytes, "video")
+        return url, None
+    except Exception as e:
+        print("    Ошибка видео: " + str(e))
+    return None, None
 
 async def get_video_thumb(client, msg):
     try:
@@ -108,7 +141,7 @@ async def get_video_thumb(client, msg):
         if thumbs:
             thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
             if thumb_bytes:
-                return await upload_photo_bytes(thumb_bytes)
+                return await upload_to_tg_bot(thumb_bytes, "photo")
     except Exception as e:
         print("    Ошибка превью: " + str(e))
     return None
@@ -171,6 +204,7 @@ async def run():
                             continue
 
                         img_url = None
+                        video_url = None
                         media_type = None
                         video_duration = None
 
@@ -181,13 +215,16 @@ async def run():
                                 print("    Фото готово!")
 
                         elif msg.media and is_video(msg):
-                            img_url = await get_video_thumb(client, msg)
-                            media_type = "video"
                             video_duration = get_video_duration(msg)
-                            if img_url:
-                                print("    Видео превью готово! " + str(video_duration))
+                            video_url, thumb_url = await get_video_url(client, msg)
+                            if video_url:
+                                img_url = thumb_url or await get_video_thumb(client, msg)
+                                media_type = "video"
+                                print("    Видео готово! " + str(video_duration))
                             else:
-                                print("    Видео без превью")
+                                img_url = thumb_url
+                                media_type = "video_link"
+                                print("    Видео большое — только превью")
 
                         link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
                         title = text[:100].split("\n")[0]
@@ -201,6 +238,7 @@ async def run():
                             "title": title,
                             "body": body,
                             "img": img_url,
+                            "video_url": video_url,
                             "media_type": media_type,
                             "video_duration": video_duration,
                             "link": link,
