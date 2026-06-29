@@ -6,7 +6,7 @@ from datetime import datetime
 import urllib.request
 import urllib.parse
 from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
@@ -39,33 +39,42 @@ def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
 
-async def get_photo_url(client, msg):
+async def upload_media(client, msg, media_type="photo"):
     try:
         img_bytes = await client.download_media(msg.media, bytes)
         if not img_bytes:
             return None
+
         boundary = "boundary789"
+        content_type = "image/jpeg" if media_type == "photo" else "video/mp4"
+        filename = "photo.jpg" if media_type == "photo" else "video.mp4"
+        endpoint = "sendPhoto" if media_type == "photo" else "sendVideo"
+        field = "photo" if media_type == "photo" else "video"
+
         part1 = (
             "--" + boundary + "\r\n"
             'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
             + TELEGRAM_CHAT_ID + "\r\n"
             "--" + boundary + "\r\n"
-            'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
-            "Content-Type: image/jpeg\r\n\r\n"
+            'Content-Disposition: form-data; name="' + field + '"; filename="' + filename + '"\r\n'
+            "Content-Type: " + content_type + "\r\n\r\n"
         ).encode()
         part2 = ("\r\n--" + boundary + "--\r\n").encode()
         body = part1 + img_bytes + part2
+
         req = urllib.request.Request(
-            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendPhoto",
+            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + endpoint,
             data=body,
             headers={"Content-Type": "multipart/form-data; boundary=" + boundary},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             result = json.loads(r.read())
             if result.get("ok"):
-                photos = result["result"]["photo"]
-                file_id = photos[-1]["file_id"]
+                if media_type == "photo":
+                    file_id = result["result"]["photo"][-1]["file_id"]
+                else:
+                    file_id = result["result"]["video"]["file_id"]
                 req2 = urllib.request.Request(
                     "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + file_id
                 )
@@ -75,8 +84,17 @@ async def get_photo_url(client, msg):
                         file_path = file_info["result"]["file_path"]
                         return "https://api.telegram.org/file/bot" + TELEGRAM_BOT_TOKEN + "/" + file_path
     except Exception as e:
-        print("    Ошибка фото: " + str(e))
+        print("    Ошибка медиа: " + str(e))
     return None
+
+def is_video(msg):
+    if not isinstance(msg.media, MessageMediaDocument):
+        return False
+    doc = msg.media.document
+    for attr in doc.attributes:
+        if hasattr(attr, 'round_message') or attr.__class__.__name__ == 'DocumentAttributeVideo':
+            return True
+    return False
 
 def push_to_api(news_items):
     try:
@@ -112,7 +130,7 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("✅ <b>NewsFeed запущен с фото!</b> 🚀")
+            await send_tg("✅ <b>NewsFeed запущен с фото и видео!</b> 🚀")
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
@@ -136,10 +154,19 @@ async def run():
                             continue
 
                         img_url = None
+                        media_type = None
+
                         if msg.media and isinstance(msg.media, MessageMediaPhoto):
-                            img_url = await get_photo_url(client, msg)
+                            img_url = await upload_media(client, msg, "photo")
+                            media_type = "photo"
                             if img_url:
-                                print("    Фото готово!")
+                                print("    📷 Фото готово!")
+
+                        elif msg.media and is_video(msg):
+                            img_url = await upload_media(client, msg, "video")
+                            media_type = "video"
+                            if img_url:
+                                print("    🎥 Видео готово!")
 
                         link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
                         title = text[:100].split("\n")[0]
@@ -153,6 +180,7 @@ async def run():
                             "title": title,
                             "body": body,
                             "img": img_url,
+                            "media_type": media_type,
                             "link": link,
                             "time": str(msg.date),
                         }
