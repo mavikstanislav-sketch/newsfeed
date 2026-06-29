@@ -11,7 +11,6 @@ from telethon.tl.types import MessageMediaPhoto
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
 API_URL = "https://newsfeed-production-9b3b.up.railway.app"
-
 API_ID   = 37103823
 API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
 SESSION  = "news_session"
@@ -39,6 +38,33 @@ def load_seen():
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
+
+async def upload_photo(client, msg):
+    """Скачиваем фото и загружаем на telegra.ph"""
+    try:
+        img_bytes = await client.download_media(msg.media, bytes)
+        if not img_bytes:
+            return None
+        # Загружаем на telegra.ph
+        boundary = "----FormBoundary"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="photo.jpg"\r\n'
+            f"Content-Type: image/jpeg\r\n\r\n"
+        ).encode() + img_bytes + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            "https://telegra.ph/upload",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            result = json.loads(r.read())
+            if result and isinstance(result, list):
+                return "https://telegra.ph" + result[0]["src"]
+    except Exception as e:
+        print(f"    Ошибка загрузки фото: {e}")
+    return None
 
 def push_to_api(news_items):
     try:
@@ -74,7 +100,7 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("✅ <b>NewsFeed запущен через Telethon!</b>\n\nТеперь новости с фото и без задержки! 🚀")
+            await send_tg("✅ <b>NewsFeed запущен!</b>\n\nТеперь новости с фото! 🚀")
         except Exception as e:
             print(f"Ошибка Telegram: {e}")
 
@@ -96,15 +122,12 @@ async def run():
                         if len(text) < 10:
                             continue
 
-                        # Фото
+                        # Фото — загружаем на telegra.ph
                         img_url = None
                         if msg.media and isinstance(msg.media, MessageMediaPhoto):
-                            try:
-                                img_path = f"/tmp/{news_id}.jpg"
-                                await client.download_media(msg.media, img_path)
-                                img_url = img_path
-                            except:
-                                pass
+                            img_url = await upload_photo(client, msg)
+                            if img_url:
+                                print(f"    📷 Фото загружено: {img_url}")
 
                         link = f"https://t.me/{ch['username']}/{msg.id}"
                         title = text[:100].split("\n")[0]
