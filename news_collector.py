@@ -27,7 +27,7 @@ CHECK_INTERVAL = 60
 SEEN_FILE = "seen_news.json"
 
 def make_id(channel, msg_id):
-    return hashlib.md5(f"{channel}{msg_id}".encode()).hexdigest()[:16]
+    return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -44,8 +44,8 @@ def get_video_duration(msg):
         for attr in msg.media.document.attributes:
             if attr.__class__.__name__ == "DocumentAttributeVideo":
                 secs = int(attr.duration)
-                return f"{secs//60:02d}:{secs%60:02d}"
-    except:
+                return str(secs // 60).zfill(2) + ":" + str(secs % 60).zfill(2)
+    except Exception:
         pass
     return "▶️"
 
@@ -58,16 +58,15 @@ def is_video(msg):
     return False
 
 async def upload_photo_bytes(img_bytes):
-    """Загружаем фото через бота и получаем прямую ссылку"""
     try:
         boundary = "boundary789"
         part1 = (
             "--" + boundary + "\r\n"
-            'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+            + 'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
             + TELEGRAM_CHAT_ID + "\r\n"
-            "--" + boundary + "\r\n"
-            'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
-            "Content-Type: image/jpeg\r\n\r\n"
+            + "--" + boundary + "\r\n"
+            + 'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
+            + "Content-Type: image/jpeg\r\n\r\n"
         ).encode()
         part2 = ("\r\n--" + boundary + "--\r\n").encode()
         body = part1 + img_bytes + part2
@@ -104,9 +103,7 @@ async def get_photo_url(client, msg):
     return None
 
 async def get_video_thumb(client, msg):
-    """Берём превью видео (thumbnail)"""
     try:
-        # Пробуем получить thumbnail
         thumbs = msg.media.document.thumbs
         if thumbs:
             thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
@@ -150,7 +147,7 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("✅ <b>NewsFeed запущен с фото и видео!</b> 🚀")
+            await send_tg("NewsFeed запущен с фото и видео!")
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
@@ -181,17 +178,16 @@ async def run():
                             img_url = await get_photo_url(client, msg)
                             media_type = "photo"
                             if img_url:
-                                print("    📷 Фото готово!")
+                                print("    Фото готово!")
 
                         elif msg.media and is_video(msg):
-                            # Берём превью видео
                             img_url = await get_video_thumb(client, msg)
                             media_type = "video"
                             video_duration = get_video_duration(msg)
                             if img_url:
-                                print("    🎥 Видео превью готово! " + str(video_duration))
+                                print("    Видео превью готово! " + str(video_duration))
                             else:
-                                print("    🎥 Видео без превью")
+                                print("    Видео без превью")
 
                         link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
                         title = text[:100].split("\n")[0]
@@ -223,4 +219,22 @@ async def run():
                     for item in new_items[:2]:
                         msg_text = (
                             ch["emoji"] + " <b>@" + ch["username"] + "</b>\n\n"
-                            "<b>" + item["title"] + "</b>\n\n"
+                            + "<b>" + item["title"] + "</b>\n\n"
+                            + item["body"][:400] + "\n\n"
+                            + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
+                        )
+                        await send_tg(msg_text)
+                        await asyncio.sleep(3)
+
+                except Exception as e:
+                    print("  Ошибка " + ch["username"] + ": " + str(e))
+
+            if all_new_items:
+                push_to_api(all_new_items)
+
+            save_seen(seen)
+            print("Жду 1 мин...\n")
+            await asyncio.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    asyncio.run(run())
