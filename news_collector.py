@@ -6,7 +6,7 @@ from datetime import datetime
 import urllib.request
 import urllib.parse
 from telethon import TelegramClient
-from telethon.tl.types import MessageMediaPhoto
+from telethon.tl.types import MessageMediaPhoto, MessageMediaWebPage
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
@@ -39,31 +39,48 @@ def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
 
-async def upload_photo(client, msg):
+async def get_photo_url(client, msg, ch_username, msg_id):
+    """Скачиваем фото и отправляем боту чтобы получить file_id"""
     try:
         img_bytes = await client.download_media(msg.media, bytes)
         if not img_bytes:
             return None
-        boundary = "boundary123456"
+
+        # Отправляем фото боту и получаем file_id
+        boundary = "boundary789"
         part1 = (
             f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="img.jpg"\r\n'
+            f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+            f"{TELEGRAM_CHAT_ID}\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
             f"Content-Type: image/jpeg\r\n\r\n"
         ).encode()
         part2 = f"\r\n--{boundary}--\r\n".encode()
         body = part1 + img_bytes + part2
+
         req = urllib.request.Request(
-            "https://telegra.ph/upload",
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
             data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             method="POST"
         )
         with urllib.request.urlopen(req, timeout=20) as r:
             result = json.loads(r.read())
-            if result and isinstance(result, list) and "src" in result[0]:
-                return "https://telegra.ph" + result[0]["src"]
+            if result.get("ok"):
+                photos = result["result"]["photo"]
+                file_id = photos[-1]["file_id"]
+                # Получаем прямую ссылку
+                req2 = urllib.request.Request(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile?file_id={file_id}"
+                )
+                with urllib.request.urlopen(req2, timeout=10) as r2:
+                    file_info = json.loads(r2.read())
+                    if file_info.get("ok"):
+                        file_path = file_info["result"]["file_path"]
+                        return f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
     except Exception as e:
-        print(f"    Ошибка загрузки фото: {e}")
+        print(f"    Ошибка фото: {e}")
     return None
 
 def push_to_api(news_items):
@@ -100,78 +117,9 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("✅ <b>NewsFeed запущен!</b>\n\nТеперь новости с фото! 🚀")
+            await send_tg("✅ <b>NewsFeed запущен с фото!</b> 🚀")
         except Exception as e:
             print(f"Ошибка Telegram: {e}")
 
         while True:
-            print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
-            all_new_items = []
-
-            for ch in CHANNELS:
-                try:
-                    messages = await client.get_messages(ch["username"], limit=10)
-                    new_items = []
-
-                    for msg in messages:
-                        news_id = make_id(ch["username"], msg.id)
-                        if news_id in seen:
-                            continue
-
-                        text = msg.text or msg.message or ""
-                        if len(text) < 10:
-                            continue
-
-                        img_url = None
-                        if msg.media and isinstance(msg.media, MessageMediaPhoto):
-                            img_url = await upload_photo(client, msg)
-                            if img_url:
-                                print(f"    📷 Фото: {img_url}")
-
-                        link = f"https://t.me/{ch['username']}/{msg.id}"
-                        title = text[:100].split("\n")[0]
-                        body = text[:600]
-
-                        item = {
-                            "id": news_id,
-                            "ch": ch["username"],
-                            "name": ch["name"],
-                            "emoji": ch["emoji"],
-                            "title": title,
-                            "body": body,
-                            "img": img_url,
-                            "link": link,
-                            "time": str(msg.date),
-                        }
-                        new_items.append(item)
-                        seen.add(news_id)
-
-                    if not new_items:
-                        print(f"  - @{ch['username']}: нет новых")
-                        continue
-
-                    print(f"  + @{ch['username']}: {len(new_items)} новых")
-                    all_new_items.extend(new_items)
-
-                    for item in new_items[:2]:
-                        msg_text = (
-                            f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
-                            f"<b>{item['title']}</b>\n\n"
-                            f"{item['body'][:400]}\n\n"
-                            f"<a href='{item['link']}'>Читать в Telegram →</a>"
-                        )
-                        await send_tg(msg_text)
-                        await asyncio.sleep(3)
-
-                except Exception as e:
-                    print(f"  Ошибка {ch['username']}: {e}")
-
-            if all_new_items:
-                push_to_api(all_new_items)
-
-            save_seen(seen)
-            print("Жду 1 мин...\n")
-            await asyncio.sleep(CHECK_INTERVAL)
-
-if __name__ == "__main__":
-    asyncio.run(run())
+            print(f"[{datetime.now().strftime('%H:%M')}]
