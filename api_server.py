@@ -106,12 +106,11 @@ def get_news():
         cur.execute("DELETE FROM news WHERE created_at < NOW() - INTERVAL '7 days'")
         conn.commit()
 
-        # Берём последние 200 новостей
+        # Берём все новости за 7 дней без лимита
         cur.execute("""
             SELECT id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time
             FROM news
             ORDER BY created_at DESC
-            LIMIT 200
         """)
         rows = cur.fetchall()
         cur.close()
