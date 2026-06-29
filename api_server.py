@@ -1,12 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import feedparser
 import re
 from html import unescape
-from concurrent.futures import ThreadPoolExecutor
 import os
 import psycopg2
-import json
 
 app = FastAPI()
 app.add_middleware(
@@ -17,14 +14,6 @@ app.add_middleware(
 )
 
 DATABASE_URL = os.environ.get("PG_URL", "")
-
-CHANNELS = [
-    {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
-    {"username": "vach_govorit",  "name": "Вач говорит",   "emoji": "🎙"},
-    {"username": "lachentyt",     "name": "Лаченко",       "emoji": "📢"},
-    {"username": "vanek_nikolaev","name": "Ваня Николаев", "emoji": "👤"},
-    {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
-]
 
 def get_db():
     url = DATABASE_URL
@@ -45,11 +34,24 @@ def init_db():
                 title TEXT,
                 body TEXT,
                 img TEXT,
+                video_url TEXT,
+                media_type TEXT,
+                video_duration TEXT,
                 link TEXT,
                 time TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        # Добавляем новые колонки если их нет (для старой БД)
+        for col, coltype in [
+            ("video_url", "TEXT"),
+            ("media_type", "TEXT"),
+            ("video_duration", "TEXT"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE news ADD COLUMN IF NOT EXISTS {col} {coltype}")
+            except Exception:
+                pass
         conn.commit()
         cur.close()
         conn.close()
@@ -60,48 +62,6 @@ def init_db():
 @app.on_event("startup")
 def startup():
     init_db()
-
-def clean_html(text):
-    text = re.sub(r'<[^>]+>', '', text)
-    return unescape(text).strip()
-
-def get_image(html):
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html or '')
-    return match.group(1) if match else None
-
-def fetch_channel(ch):
-    urls = [
-        f"https://tg.i-c-a.su/rss/{ch['username']}",
-        f"https://rsshub.app/telegram/channel/{ch['username']}",
-    ]
-    for url in urls:
-        try:
-            feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
-            if feed.entries:
-                items = []
-                for entry in feed.entries[:10]:
-                    desc = entry.get("summary", "") or entry.get("description", "")
-                    img = get_image(desc)
-                    text = clean_html(desc)
-                    title = clean_html(entry.get("title", ""))
-                    if not title and not text:
-                        continue
-                    items.append({
-                        "id": entry.get("id", entry.get("link", ""))[-20:],
-                        "ch": ch["username"],
-                        "name": ch["name"],
-                        "emoji": ch["emoji"],
-                        "title": title[:200],
-                        "body": text[:600],
-                        "img": img,
-                        "link": entry.get("link", ""),
-                        "time": entry.get("published", ""),
-                    })
-                if items:
-                    return items
-        except Exception as e:
-            print(f"Error {ch['username']}: {e}")
-    return []
 
 @app.get("/")
 def root():
@@ -116,13 +76,18 @@ def push_news(data: dict):
         cur = conn.cursor()
         for item in new_items:
             cur.execute("""
-                INSERT INTO news (id, ch, name, emoji, title, body, img, link, time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (id) DO NOTHING
+                INSERT INTO news (id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (id) DO UPDATE SET
+                    img = EXCLUDED.img,
+                    video_url = EXCLUDED.video_url,
+                    media_type = EXCLUDED.media_type,
+                    video_duration = EXCLUDED.video_duration
             """, (
                 item.get("id"), item.get("ch"), item.get("name"),
                 item.get("emoji"), item.get("title"), item.get("body"),
-                item.get("img"), item.get("link"), item.get("time")
+                item.get("img"), item.get("video_url"), item.get("media_type"),
+                item.get("video_duration"), item.get("link"), item.get("time")
             ))
             if cur.rowcount > 0:
                 added += 1
@@ -140,7 +105,7 @@ def get_news():
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, ch, name, emoji, title, body, img, link, time
+            SELECT id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time
             FROM news
             ORDER BY created_at DESC
             LIMIT 50
@@ -154,18 +119,11 @@ def get_news():
                 news.append({
                     "id": row[0], "ch": row[1], "name": row[2],
                     "emoji": row[3], "title": row[4], "body": row[5],
-                    "img": row[6], "link": row[7], "time": row[8]
+                    "img": row[6], "video_url": row[7], "media_type": row[8],
+                    "video_duration": row[9], "link": row[10], "time": row[11]
                 })
             print(f"Отдаём из БД: {len(news)} новостей")
             return {"news": news, "total": len(news)}
     except Exception as e:
         print(f"Ошибка чтения БД: {e}")
-
-    # Резервный вариант — RSS
-    print("БД недоступна, парсим RSS...")
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        results = list(executor.map(fetch_channel, CHANNELS))
-    all_news = []
-    for items in results:
-        all_news.extend(items)
-    return {"news": all_news, "total": len(all_news)}
+    return {"news": [], "total": 0}
