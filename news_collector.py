@@ -16,6 +16,7 @@ API_ID   = 37103823
 API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
 SESSION  = "news_session"
 DATABASE_URL = os.environ.get("PG_URL", "")
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
 CHANNELS = [
     {"username": "ssternenko",     "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -24,15 +25,6 @@ CHANNELS = [
     {"username": "vanek_nikolaev", "name": "Ваня Николаев", "emoji": "👤"},
     {"username": "truexanewsua",   "name": "TrueXA News",   "emoji": "📰"},
 ]
-
-CATEGORIES = {
-    "front":    ["фронт", "передок", "наступ", "зсу", "бригада", "позиції", "окоп", "бої", "штурм", "оборона"],
-    "kyiv":     ["київ", "kyiv", "столиця", "київська", "поділ", "оболонь", "дарниця"],
-    "alarm":    ["тривога", "ракета", "шахед", "бпл", "вибух", "ппо", "обстріл", "удар", "загроза"],
-    "allies":   ["сша", "нато", "допомога", "зброя", "байден", "трамп", "союзники", "партнери", "допомагають"],
-    "russia":   ["москва", "кремль", "путін", "росія", "рф", "кадиров", "медведєв"],
-    "strikes":  ["приліт", "удар по росії", "бпла атакував", "атака на рф", "горить в росії", "вибух в москві"],
-}
 
 CHECK_INTERVAL = 10
 
@@ -99,9 +91,76 @@ def save_seen_ids(new_ids):
 def make_id(channel, msg_id):
     return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
 
-def get_category(text):
+async def analyze_with_ai(text, channel):
+    """Claude анализирует новость — категория + фейк"""
+    if not CLAUDE_API_KEY:
+        return get_category_simple(text), "unknown", ""
+    try:
+        prompt = """Проаналізуй цю новину з українського Telegram каналу.
+
+Новина від @""" + channel + """:
+""" + text[:500] + """
+
+Відповідай ТІЛЬКИ у форматі JSON без зайвого тексту:
+{
+  "category": "одна з: front / kyiv / alarm / allies / russia / strikes / general",
+  "is_fake": "true або false",
+  "fake_reason": "коротко чому фейк або порожньо"
+}
+
+Категорії:
+- front: фронт, бої, ЗСУ, наступ, позиції, бригада
+- kyiv: Київ, столиця, київські новини
+- alarm: тривога, ракета, шахед, БпЛ, вибух, ППО, обстріл
+- allies: США, НАТО, допомога, зброя, союзники
+- russia: Росія, Москва, Кремль, Путін, РФ
+- strikes: прильоти в РФ, удари по росії, БПЛА атакував РФ
+- general: все інше"""
+
+        data = json.dumps({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 150,
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            result = json.loads(r.read())
+            txt = result["content"][0]["text"].strip()
+            # Чистим JSON если есть лишнее
+            if "```" in txt:
+                txt = txt.split("```")[1].replace("json", "").strip()
+            parsed = json.loads(txt)
+            category = parsed.get("category", "general")
+            is_fake = parsed.get("is_fake", "false") == "true"
+            fake_reason = parsed.get("fake_reason", "")
+            print("    AI: категория=" + category + " фейк=" + str(is_fake))
+            return category, is_fake, fake_reason
+    except Exception as e:
+        print("    Ошибка AI: " + str(e))
+        return get_category_simple(text), False, ""
+
+def get_category_simple(text):
+    """Резервная категоризация по ключевым словам"""
     text_lower = text.lower()
-    for cat, keywords in CATEGORIES.items():
+    cats = {
+        "front":   ["фронт", "передок", "наступ", "зсу", "бригада", "позиції", "бої", "штурм"],
+        "kyiv":    ["київ", "kyiv", "столиця", "київська"],
+        "alarm":   ["тривога", "ракета", "шахед", "бпл", "вибух", "ппо", "обстріл"],
+        "allies":  ["сша", "нато", "допомога", "зброя", "байден", "трамп"],
+        "russia":  ["москва", "кремль", "путін", "росія", "рф"],
+        "strikes": ["приліт", "удар по росії", "бпла атакував", "горить в росії"],
+    }
+    for cat, keywords in cats.items():
         for kw in keywords:
             if kw in text_lower:
                 return cat
@@ -198,7 +257,7 @@ async def get_video_url(client, msg):
     try:
         size = get_video_size(msg)
         if size > 19 * 1024 * 1024:
-            print("    Видео большое: " + str(size // 1024 // 1024) + "МБ — только превью")
+            print("    Видео большое — только превью")
             return None, await get_video_thumb(client, msg)
         video_bytes = await client.download_media(msg.media, bytes)
         if not video_bytes:
@@ -257,7 +316,7 @@ async def process_channel(client, ch, seen):
                 img_url = await get_photo_url(client, msg)
                 media_type = "photo"
                 if img_url:
-                    print("    Фото готово! @" + ch["username"])
+                    print("    Фото! @" + ch["username"])
 
             elif msg.media and is_video(msg):
                 video_duration = get_video_duration(msg)
@@ -265,12 +324,13 @@ async def process_channel(client, ch, seen):
                 if video_url:
                     img_url = thumb_url or await get_video_thumb(client, msg)
                     media_type = "video"
-                    print("    Видео готово! " + str(video_duration) + " @" + ch["username"])
                 else:
                     img_url = thumb_url
                     media_type = "video_link"
 
-            category = get_category(text)
+            # AI анализ
+            category, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
+
             link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
             title = text[:100].split("\n")[0]
             body = text[:600]
@@ -287,6 +347,8 @@ async def process_channel(client, ch, seen):
                 "media_type": media_type,
                 "video_duration": video_duration,
                 "category": category,
+                "is_fake": is_fake,
+                "fake_reason": fake_reason,
                 "link": link,
                 "time": str(msg.date),
             }
@@ -313,7 +375,7 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("NewsFeed запущен! Параллельная проверка каналов!")
+            await send_tg("NewsFeed с AI категориями запущен! 🚀")
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
@@ -321,7 +383,6 @@ async def run():
             now = datetime.now().strftime("%H:%M")
             print("[" + now + "] Проверяю все каналы параллельно...")
 
-            # Проверяем все каналы ОДНОВРЕМЕННО
             tasks = [process_channel(client, ch, seen) for ch in CHANNELS]
             results = await asyncio.gather(*tasks)
 
@@ -334,11 +395,11 @@ async def run():
 
             if all_new_items:
                 push_to_api(all_new_items)
-
-                # Отправляем в бот только 2 самые свежие
                 for item in all_new_items[:2]:
+                    cat_emoji = {"front":"⚔️","kyiv":"🏙","alarm":"🚨","allies":"🤝","russia":"🇷🇺","strikes":"💥"}.get(item.get("category",""), "📰")
+                    fake_label = " ⚠️ МОЖЛИВИЙ ФЕЙК" if item.get("is_fake") else ""
                     msg_text = (
-                        item["emoji"] + " <b>@" + item["ch"] + "</b>\n\n"
+                        cat_emoji + " " + item["emoji"] + " <b>@" + item["ch"] + "</b>" + fake_label + "\n\n"
                         + "<b>" + item["title"] + "</b>\n\n"
                         + item["body"][:400] + "\n\n"
                         + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
