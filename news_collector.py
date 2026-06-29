@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+import psycopg2
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
@@ -14,6 +15,7 @@ API_URL = "https://newsfeed-production-9b3b.up.railway.app"
 API_ID   = 37103823
 API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
 SESSION  = "news_session"
+DATABASE_URL = os.environ.get("PG_URL", "")
 
 CHANNELS = [
     {"username": "ssternenko",     "name": "Стерненко",     "emoji": "🇺🇦"},
@@ -24,20 +26,69 @@ CHANNELS = [
 ]
 
 CHECK_INTERVAL = 60
-SEEN_FILE = "seen_news.json"
+
+def get_db():
+    url = DATABASE_URL
+    if url and "sslmode" not in url:
+        url += "?sslmode=require"
+    return psycopg2.connect(url)
+
+def init_seen_table():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS seen_news (
+                id TEXT PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("Таблица seen_news готова!")
+    except Exception as e:
+        print("Ошибка init seen: " + str(e))
+
+def load_seen():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM seen_news")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        seen = set(row[0] for row in rows)
+        print("Загружено из БД seen: " + str(len(seen)) + " записей")
+        return seen
+    except Exception as e:
+        print("Ошибка load seen: " + str(e))
+        return set()
+
+def save_seen_ids(new_ids):
+    if not new_ids:
+        return
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        for nid in new_ids:
+            cur.execute(
+                "INSERT INTO seen_news (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
+                (nid,)
+            )
+        cur.execute("""
+            DELETE FROM seen_news WHERE id NOT IN (
+                SELECT id FROM seen_news ORDER BY created_at DESC LIMIT 2000
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Ошибка save seen: " + str(e))
 
 def make_id(channel, msg_id):
     return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
-
-def load_seen():
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
-
-def save_seen(seen):
-    with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen)[-500:], f)
 
 def get_video_duration(msg):
     try:
@@ -70,7 +121,6 @@ async def upload_to_tg_bot(img_bytes, filetype="photo"):
         filename = "photo.jpg" if filetype == "photo" else "video.mp4"
         content_type = "image/jpeg" if filetype == "photo" else "video/mp4"
         endpoint = "sendPhoto" if filetype == "photo" else "sendVideo"
-
         part1 = (
             "--" + boundary + "\r\n"
             + 'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
@@ -81,7 +131,6 @@ async def upload_to_tg_bot(img_bytes, filetype="photo"):
         ).encode()
         part2 = ("\r\n--" + boundary + "--\r\n").encode()
         body = part1 + img_bytes + part2
-
         req = urllib.request.Request(
             "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + endpoint,
             data=body,
@@ -95,7 +144,6 @@ async def upload_to_tg_bot(img_bytes, filetype="photo"):
                     file_id = result["result"]["photo"][-1]["file_id"]
                 else:
                     file_id = result["result"]["video"]["file_id"]
-
                 req2 = urllib.request.Request(
                     "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + file_id
                 )
@@ -122,10 +170,8 @@ async def get_video_url(client, msg):
     try:
         size = get_video_size(msg)
         if size > 19 * 1024 * 1024:
-            print("    Видео слишком большое: " + str(size // 1024 // 1024) + "МБ — пропускаем")
-            # Берём только превью
+            print("    Видео большое: " + str(size // 1024 // 1024) + "МБ — только превью")
             return None, await get_video_thumb(client, msg)
-
         video_bytes = await client.download_media(msg.media, bytes)
         if not video_bytes:
             return None, None
@@ -173,6 +219,7 @@ async def send_tg(text):
         return json.loads(r.read())
 
 async def run():
+    init_seen_table()
     seen = load_seen()
     print("Запускаю Telethon...")
 
@@ -180,7 +227,7 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("NewsFeed запущен с фото и видео!")
+            await send_tg("NewsFeed запущен! Seen из БД: " + str(len(seen)))
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
@@ -188,6 +235,7 @@ async def run():
             now = datetime.now().strftime("%H:%M")
             print("[" + now + "] Проверяю новости...")
             all_new_items = []
+            new_seen_ids = []
 
             for ch in CHANNELS:
                 try:
@@ -246,6 +294,7 @@ async def run():
                         }
                         new_items.append(item)
                         seen.add(news_id)
+                        new_seen_ids.append(news_id)
 
                     if not new_items:
                         print("  - @" + ch["username"] + ": нет новых")
@@ -270,7 +319,9 @@ async def run():
             if all_new_items:
                 push_to_api(all_new_items)
 
-            save_seen(seen)
+            if new_seen_ids:
+                save_seen_ids(new_seen_ids)
+
             print("Жду 1 мин...\n")
             await asyncio.sleep(CHECK_INTERVAL)
 
