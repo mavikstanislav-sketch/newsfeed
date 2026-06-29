@@ -25,7 +25,16 @@ CHANNELS = [
     {"username": "truexanewsua",   "name": "TrueXA News",   "emoji": "📰"},
 ]
 
-CHECK_INTERVAL = 60
+CATEGORIES = {
+    "front":    ["фронт", "передок", "наступ", "зсу", "бригада", "позиції", "окоп", "бої", "штурм", "оборона"],
+    "kyiv":     ["київ", "kyiv", "столиця", "київська", "поділ", "оболонь", "дарниця"],
+    "alarm":    ["тривога", "ракета", "шахед", "бпл", "вибух", "ппо", "обстріл", "удар", "загроза"],
+    "allies":   ["сша", "нато", "допомога", "зброя", "байден", "трамп", "союзники", "партнери", "допомагають"],
+    "russia":   ["москва", "кремль", "путін", "росія", "рф", "кадиров", "медведєв"],
+    "strikes":  ["приліт", "удар по росії", "бпла атакував", "атака на рф", "горить в росії", "вибух в москві"],
+}
+
+CHECK_INTERVAL = 10
 
 def get_db():
     url = DATABASE_URL
@@ -89,6 +98,14 @@ def save_seen_ids(new_ids):
 
 def make_id(channel, msg_id):
     return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
+
+def get_category(text):
+    text_lower = text.lower()
+    for cat, keywords in CATEGORIES.items():
+        for kw in keywords:
+            if kw in text_lower:
+                return cat
+    return "general"
 
 def get_video_duration(msg):
     try:
@@ -166,6 +183,17 @@ async def get_photo_url(client, msg):
         print("    Ошибка фото: " + str(e))
     return None
 
+async def get_video_thumb(client, msg):
+    try:
+        thumbs = msg.media.document.thumbs
+        if thumbs:
+            thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
+            if thumb_bytes:
+                return await upload_to_tg_bot(thumb_bytes, "photo")
+    except Exception as e:
+        print("    Ошибка превью: " + str(e))
+    return None
+
 async def get_video_url(client, msg):
     try:
         size = get_video_size(msg)
@@ -180,17 +208,6 @@ async def get_video_url(client, msg):
     except Exception as e:
         print("    Ошибка видео: " + str(e))
     return None, None
-
-async def get_video_thumb(client, msg):
-    try:
-        thumbs = msg.media.document.thumbs
-        if thumbs:
-            thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
-            if thumb_bytes:
-                return await upload_to_tg_bot(thumb_bytes, "photo")
-    except Exception as e:
-        print("    Ошибка превью: " + str(e))
-    return None
 
 def push_to_api(news_items):
     try:
@@ -218,6 +235,75 @@ async def send_tg(text):
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
+async def process_channel(client, ch, seen):
+    new_items = []
+    new_seen_ids = []
+    try:
+        messages = await client.get_messages(ch["username"], limit=10)
+        for msg in messages:
+            news_id = make_id(ch["username"], msg.id)
+            if news_id in seen:
+                continue
+            text = msg.text or msg.message or ""
+            if len(text) < 10:
+                continue
+
+            img_url = None
+            video_url = None
+            media_type = None
+            video_duration = None
+
+            if msg.media and isinstance(msg.media, MessageMediaPhoto):
+                img_url = await get_photo_url(client, msg)
+                media_type = "photo"
+                if img_url:
+                    print("    Фото готово! @" + ch["username"])
+
+            elif msg.media and is_video(msg):
+                video_duration = get_video_duration(msg)
+                video_url, thumb_url = await get_video_url(client, msg)
+                if video_url:
+                    img_url = thumb_url or await get_video_thumb(client, msg)
+                    media_type = "video"
+                    print("    Видео готово! " + str(video_duration) + " @" + ch["username"])
+                else:
+                    img_url = thumb_url
+                    media_type = "video_link"
+
+            category = get_category(text)
+            link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
+            title = text[:100].split("\n")[0]
+            body = text[:600]
+
+            item = {
+                "id": news_id,
+                "ch": ch["username"],
+                "name": ch["name"],
+                "emoji": ch["emoji"],
+                "title": title,
+                "body": body,
+                "img": img_url,
+                "video_url": video_url,
+                "media_type": media_type,
+                "video_duration": video_duration,
+                "category": category,
+                "link": link,
+                "time": str(msg.date),
+            }
+            new_items.append(item)
+            seen.add(news_id)
+            new_seen_ids.append(news_id)
+
+        if new_items:
+            print("  + @" + ch["username"] + ": " + str(len(new_items)) + " новых")
+        else:
+            print("  - @" + ch["username"] + ": нет новых")
+
+    except Exception as e:
+        print("  Ошибка " + ch["username"] + ": " + str(e))
+
+    return new_items, new_seen_ids
+
 async def run():
     init_seen_table()
     seen = load_seen()
@@ -227,102 +313,43 @@ async def run():
         print("Telethon подключён!")
 
         try:
-            await send_tg("NewsFeed запущен! Seen из БД: " + str(len(seen)))
+            await send_tg("NewsFeed запущен! Параллельная проверка каналов!")
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
         while True:
             now = datetime.now().strftime("%H:%M")
-            print("[" + now + "] Проверяю новости...")
+            print("[" + now + "] Проверяю все каналы параллельно...")
+
+            # Проверяем все каналы ОДНОВРЕМЕННО
+            tasks = [process_channel(client, ch, seen) for ch in CHANNELS]
+            results = await asyncio.gather(*tasks)
+
             all_new_items = []
-            new_seen_ids = []
+            all_new_seen = []
 
-            for ch in CHANNELS:
-                try:
-                    messages = await client.get_messages(ch["username"], limit=10)
-                    new_items = []
-
-                    for msg in messages:
-                        news_id = make_id(ch["username"], msg.id)
-                        if news_id in seen:
-                            continue
-
-                        text = msg.text or msg.message or ""
-                        if len(text) < 10:
-                            continue
-
-                        img_url = None
-                        video_url = None
-                        media_type = None
-                        video_duration = None
-
-                        if msg.media and isinstance(msg.media, MessageMediaPhoto):
-                            img_url = await get_photo_url(client, msg)
-                            media_type = "photo"
-                            if img_url:
-                                print("    Фото готово!")
-
-                        elif msg.media and is_video(msg):
-                            video_duration = get_video_duration(msg)
-                            video_url, thumb_url = await get_video_url(client, msg)
-                            if video_url:
-                                img_url = thumb_url or await get_video_thumb(client, msg)
-                                media_type = "video"
-                                print("    Видео готово! " + str(video_duration))
-                            else:
-                                img_url = thumb_url
-                                media_type = "video_link"
-                                print("    Видео большое — только превью")
-
-                        link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
-                        title = text[:100].split("\n")[0]
-                        body = text[:600]
-
-                        item = {
-                            "id": news_id,
-                            "ch": ch["username"],
-                            "name": ch["name"],
-                            "emoji": ch["emoji"],
-                            "title": title,
-                            "body": body,
-                            "img": img_url,
-                            "video_url": video_url,
-                            "media_type": media_type,
-                            "video_duration": video_duration,
-                            "link": link,
-                            "time": str(msg.date),
-                        }
-                        new_items.append(item)
-                        seen.add(news_id)
-                        new_seen_ids.append(news_id)
-
-                    if not new_items:
-                        print("  - @" + ch["username"] + ": нет новых")
-                        continue
-
-                    print("  + @" + ch["username"] + ": " + str(len(new_items)) + " новых")
-                    all_new_items.extend(new_items)
-
-                    for item in new_items[:2]:
-                        msg_text = (
-                            ch["emoji"] + " <b>@" + ch["username"] + "</b>\n\n"
-                            + "<b>" + item["title"] + "</b>\n\n"
-                            + item["body"][:400] + "\n\n"
-                            + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
-                        )
-                        await send_tg(msg_text)
-                        await asyncio.sleep(3)
-
-                except Exception as e:
-                    print("  Ошибка " + ch["username"] + ": " + str(e))
+            for new_items, new_seen_ids in results:
+                all_new_items.extend(new_items)
+                all_new_seen.extend(new_seen_ids)
 
             if all_new_items:
                 push_to_api(all_new_items)
 
-            if new_seen_ids:
-                save_seen_ids(new_seen_ids)
+                # Отправляем в бот только 2 самые свежие
+                for item in all_new_items[:2]:
+                    msg_text = (
+                        item["emoji"] + " <b>@" + item["ch"] + "</b>\n\n"
+                        + "<b>" + item["title"] + "</b>\n\n"
+                        + item["body"][:400] + "\n\n"
+                        + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
+                    )
+                    await send_tg(msg_text)
+                    await asyncio.sleep(2)
 
-            print("Жду 1 мин...\n")
+            if all_new_seen:
+                save_seen_ids(all_new_seen)
+
+            print("Жду " + str(CHECK_INTERVAL) + " сек...\n")
             await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
