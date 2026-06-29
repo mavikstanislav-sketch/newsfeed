@@ -39,42 +39,48 @@ def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
 
-async def upload_media(client, msg, media_type="photo"):
+def get_video_duration(msg):
     try:
-        img_bytes = await client.download_media(msg.media, bytes)
-        if not img_bytes:
-            return None
+        for attr in msg.media.document.attributes:
+            if attr.__class__.__name__ == "DocumentAttributeVideo":
+                secs = int(attr.duration)
+                return f"{secs//60:02d}:{secs%60:02d}"
+    except:
+        pass
+    return "▶️"
 
+def is_video(msg):
+    if not isinstance(msg.media, MessageMediaDocument):
+        return False
+    for attr in msg.media.document.attributes:
+        if attr.__class__.__name__ == "DocumentAttributeVideo":
+            return True
+    return False
+
+async def upload_photo_bytes(img_bytes):
+    """Загружаем фото через бота и получаем прямую ссылку"""
+    try:
         boundary = "boundary789"
-        content_type = "image/jpeg" if media_type == "photo" else "video/mp4"
-        filename = "photo.jpg" if media_type == "photo" else "video.mp4"
-        endpoint = "sendPhoto" if media_type == "photo" else "sendVideo"
-        field = "photo" if media_type == "photo" else "video"
-
         part1 = (
             "--" + boundary + "\r\n"
             'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
             + TELEGRAM_CHAT_ID + "\r\n"
             "--" + boundary + "\r\n"
-            'Content-Disposition: form-data; name="' + field + '"; filename="' + filename + '"\r\n'
-            "Content-Type: " + content_type + "\r\n\r\n"
+            'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
+            "Content-Type: image/jpeg\r\n\r\n"
         ).encode()
         part2 = ("\r\n--" + boundary + "--\r\n").encode()
         body = part1 + img_bytes + part2
-
         req = urllib.request.Request(
-            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + endpoint,
+            "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendPhoto",
             data=body,
             headers={"Content-Type": "multipart/form-data; boundary=" + boundary},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:
             result = json.loads(r.read())
             if result.get("ok"):
-                if media_type == "photo":
-                    file_id = result["result"]["photo"][-1]["file_id"]
-                else:
-                    file_id = result["result"]["video"]["file_id"]
+                file_id = result["result"]["photo"][-1]["file_id"]
                 req2 = urllib.request.Request(
                     "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + file_id
                 )
@@ -84,17 +90,31 @@ async def upload_media(client, msg, media_type="photo"):
                         file_path = file_info["result"]["file_path"]
                         return "https://api.telegram.org/file/bot" + TELEGRAM_BOT_TOKEN + "/" + file_path
     except Exception as e:
-        print("    Ошибка медиа: " + str(e))
+        print("    Ошибка загрузки фото: " + str(e))
     return None
 
-def is_video(msg):
-    if not isinstance(msg.media, MessageMediaDocument):
-        return False
-    doc = msg.media.document
-    for attr in doc.attributes:
-        if hasattr(attr, 'round_message') or attr.__class__.__name__ == 'DocumentAttributeVideo':
-            return True
-    return False
+async def get_photo_url(client, msg):
+    try:
+        img_bytes = await client.download_media(msg.media, bytes)
+        if not img_bytes:
+            return None
+        return await upload_photo_bytes(img_bytes)
+    except Exception as e:
+        print("    Ошибка фото: " + str(e))
+    return None
+
+async def get_video_thumb(client, msg):
+    """Берём превью видео (thumbnail)"""
+    try:
+        # Пробуем получить thumbnail
+        thumbs = msg.media.document.thumbs
+        if thumbs:
+            thumb_bytes = await client.download_media(msg.media, bytes, thumb=-1)
+            if thumb_bytes:
+                return await upload_photo_bytes(thumb_bytes)
+    except Exception as e:
+        print("    Ошибка превью: " + str(e))
+    return None
 
 def push_to_api(news_items):
     try:
@@ -155,18 +175,23 @@ async def run():
 
                         img_url = None
                         media_type = None
+                        video_duration = None
 
                         if msg.media and isinstance(msg.media, MessageMediaPhoto):
-                            img_url = await upload_media(client, msg, "photo")
+                            img_url = await get_photo_url(client, msg)
                             media_type = "photo"
                             if img_url:
                                 print("    📷 Фото готово!")
 
                         elif msg.media and is_video(msg):
-                            img_url = await upload_media(client, msg, "video")
+                            # Берём превью видео
+                            img_url = await get_video_thumb(client, msg)
                             media_type = "video"
+                            video_duration = get_video_duration(msg)
                             if img_url:
-                                print("    🎥 Видео готово!")
+                                print("    🎥 Видео превью готово! " + str(video_duration))
+                            else:
+                                print("    🎥 Видео без превью")
 
                         link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
                         title = text[:100].split("\n")[0]
@@ -181,6 +206,7 @@ async def run():
                             "body": body,
                             "img": img_url,
                             "media_type": media_type,
+                            "video_duration": video_duration,
                             "link": link,
                             "time": str(msg.date),
                         }
@@ -198,21 +224,3 @@ async def run():
                         msg_text = (
                             ch["emoji"] + " <b>@" + ch["username"] + "</b>\n\n"
                             "<b>" + item["title"] + "</b>\n\n"
-                            + item["body"][:400] + "\n\n"
-                            "<a href='" + item["link"] + "'>Читать в Telegram →</a>"
-                        )
-                        await send_tg(msg_text)
-                        await asyncio.sleep(3)
-
-                except Exception as e:
-                    print("  Ошибка " + ch["username"] + ": " + str(e))
-
-            if all_new_items:
-                push_to_api(all_new_items)
-
-            save_seen(seen)
-            print("Жду 1 мин...\n")
-            await asyncio.sleep(CHECK_INTERVAL)
-
-if __name__ == "__main__":
-    asyncio.run(run())
