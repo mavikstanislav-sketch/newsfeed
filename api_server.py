@@ -1,7 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import re
-from html import unescape
 import os
 import psycopg2
 
@@ -42,7 +40,6 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
-        # Добавляем новые колонки если их нет (для старой БД)
         for col, coltype in [
             ("video_url", "TEXT"),
             ("media_type", "TEXT"),
@@ -104,11 +101,17 @@ def get_news():
     try:
         conn = get_db()
         cur = conn.cursor()
+
+        # Удаляем новости старше 7 дней
+        cur.execute("DELETE FROM news WHERE created_at < NOW() - INTERVAL '7 days'")
+        conn.commit()
+
+        # Берём последние 200 новостей
         cur.execute("""
             SELECT id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time
             FROM news
             ORDER BY created_at DESC
-            LIMIT 50
+            LIMIT 200
         """)
         rows = cur.fetchall()
         cur.close()
