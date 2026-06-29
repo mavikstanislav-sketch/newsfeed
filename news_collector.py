@@ -1,39 +1,34 @@
 import asyncio
-import feedparser
 import json
 import os
 import hashlib
 from datetime import datetime
-from html import unescape
-import re
 import urllib.request
 import urllib.parse
+from telethon import TelegramClient
+from telethon.tl.types import MessageMediaPhoto
 
 TELEGRAM_BOT_TOKEN = "8798274501:AAGUCgF9bz6_w2VeTvy1CK_L4-6G4u7SGSM"
 TELEGRAM_CHAT_ID   = "8761012731"
 API_URL = "https://newsfeed-production-9b3b.up.railway.app"
 
+API_ID   = 37103823
+API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
+SESSION  = "news_session"
+
 CHANNELS = [
-    {"username": "ssternenko",    "name": "Стерненко",     "emoji": "🇺🇦"},
-    {"username": "vach_govorit",  "name": "Вач говорит",   "emoji": "🎙"},
-    {"username": "lachentyt",     "name": "Лаченко",       "emoji": "📢"},
-    {"username": "vanek_nikolaev","name": "Ваня Николаев", "emoji": "👤"},
-    {"username": "truexanewsua",  "name": "TrueXA News",   "emoji": "📰"},
+    {"username": "ssternenko",     "name": "Стерненко",     "emoji": "🇺🇦"},
+    {"username": "vach_govorit",   "name": "Вач говорит",   "emoji": "🎙"},
+    {"username": "lachentyt",      "name": "Лаченко",       "emoji": "📢"},
+    {"username": "vanek_nikolaev", "name": "Ваня Николаев", "emoji": "👤"},
+    {"username": "truexanewsua",   "name": "TrueXA News",   "emoji": "📰"},
 ]
 
 CHECK_INTERVAL = 60
 SEEN_FILE = "seen_news.json"
 
-def clean_html(text):
-    text = re.sub(r'<[^>]+>', '', text)
-    return unescape(text).strip()
-
-def get_image(html):
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html or '')
-    return match.group(1) if match else None
-
-def make_id(url, title):
-    return hashlib.md5((url + title).encode()).hexdigest()[:16]
+def make_id(channel, msg_id):
+    return hashlib.md5(f"{channel}{msg_id}".encode()).hexdigest()[:16]
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -44,40 +39,6 @@ def load_seen():
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen)[-500:], f)
-
-def fetch_news(channel):
-    urls = [
-        f"https://tg.i-c-a.su/rss/{channel['username']}",
-        f"https://rsshub.app/telegram/channel/{channel['username']}",
-    ]
-    for url in urls:
-        try:
-            feed = feedparser.parse(url)
-            if feed.entries:
-                items = []
-                for entry in feed.entries[:5]:
-                    desc = entry.get("summary", "") or entry.get("description", "")
-                    img = get_image(desc)
-                    title = clean_html(entry.get("title", ""))
-                    body = clean_html(desc)
-                    link = entry.get("link", "")
-                    if len(title) < 5 and len(body) < 10:
-                        continue
-                    items.append({
-                        "id": make_id(link, title),
-                        "ch": channel["username"],
-                        "name": channel["name"],
-                        "emoji": channel["emoji"],
-                        "title": title[:300],
-                        "body": body[:600],
-                        "img": img,
-                        "link": link,
-                        "time": entry.get("published", ""),
-                    })
-                return items
-        except Exception as e:
-            print(f"    ошибка: {e}")
-    return []
 
 def push_to_api(news_items):
     try:
@@ -107,52 +68,88 @@ async def send_tg(text):
 
 async def run():
     seen = load_seen()
-    print("Бот запущен!")
+    print("Запускаю Telethon...")
 
-    try:
-        await send_tg("✅ <b>NewsFeed бот запущен!</b>\n\nРаботаю 24/7\n\n" +
-            "\n".join(f"{c['emoji']} @{c['username']}" for c in CHANNELS))
-        print("Стартовое сообщение отправлено!")
-    except Exception as e:
-        print(f"Ошибка Telegram: {e}")
-        return
+    async with TelegramClient(SESSION, API_ID, API_HASH) as client:
+        print("Telethon подключён!")
 
-    while True:
-        print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
-        all_new_items = []
+        try:
+            await send_tg("✅ <b>NewsFeed запущен через Telethon!</b>\n\nТеперь новости с фото и без задержки! 🚀")
+        except Exception as e:
+            print(f"Ошибка Telegram: {e}")
 
-        for ch in CHANNELS:
-            try:
-                items = fetch_news(ch)
-                new_items = [i for i in items if i["id"] not in seen]
+        while True:
+            print(f"[{datetime.now().strftime('%H:%M')}] Проверяю новости...")
+            all_new_items = []
 
-                if not new_items:
-                    print(f"  - @{ch['username']}: нет новых")
-                    continue
+            for ch in CHANNELS:
+                try:
+                    messages = await client.get_messages(ch["username"], limit=10)
+                    new_items = []
 
-                print(f"  + @{ch['username']}: {len(new_items)} новых")
-                all_new_items.extend(new_items)
+                    for msg in messages:
+                        news_id = make_id(ch["username"], msg.id)
+                        if news_id in seen:
+                            continue
 
-                for item in new_items[:2]:
-                    msg = (
-                        f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
-                        f"<b>{item['title']}</b>\n\n"
-                        f"{item['body'][:400]}\n\n"
-                        f"<a href='{item['link']}'>Читать в Telegram →</a>"
-                    )
-                    await send_tg(msg)
-                    seen.add(item["id"])
-                    print(f"    отправлено: {item['title'][:50]}")
-                    await asyncio.sleep(3)
-            except Exception as e:
-                print(f"  Ошибка {ch['username']}: {e}")
+                        text = msg.text or msg.message or ""
+                        if len(text) < 10:
+                            continue
 
-        if all_new_items:
-            push_to_api(all_new_items)
+                        # Фото
+                        img_url = None
+                        if msg.media and isinstance(msg.media, MessageMediaPhoto):
+                            try:
+                                img_path = f"/tmp/{news_id}.jpg"
+                                await client.download_media(msg.media, img_path)
+                                img_url = img_path
+                            except:
+                                pass
 
-        save_seen(seen)
-        print("Жду 1 мин...\n")
-        await asyncio.sleep(CHECK_INTERVAL)
+                        link = f"https://t.me/{ch['username']}/{msg.id}"
+                        title = text[:100].split("\n")[0]
+                        body = text[:600]
+
+                        item = {
+                            "id": news_id,
+                            "ch": ch["username"],
+                            "name": ch["name"],
+                            "emoji": ch["emoji"],
+                            "title": title,
+                            "body": body,
+                            "img": img_url,
+                            "link": link,
+                            "time": str(msg.date),
+                        }
+                        new_items.append(item)
+                        seen.add(news_id)
+
+                    if not new_items:
+                        print(f"  - @{ch['username']}: нет новых")
+                        continue
+
+                    print(f"  + @{ch['username']}: {len(new_items)} новых")
+                    all_new_items.extend(new_items)
+
+                    for item in new_items[:2]:
+                        msg_text = (
+                            f"{ch['emoji']} <b>@{ch['username']}</b>\n\n"
+                            f"<b>{item['title']}</b>\n\n"
+                            f"{item['body'][:400]}\n\n"
+                            f"<a href='{item['link']}'>Читать в Telegram →</a>"
+                        )
+                        await send_tg(msg_text)
+                        await asyncio.sleep(3)
+
+                except Exception as e:
+                    print(f"  Ошибка {ch['username']}: {e}")
+
+            if all_new_items:
+                push_to_api(all_new_items)
+
+            save_seen(seen)
+            print("Жду 1 мин...\n")
+            await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     asyncio.run(run())
