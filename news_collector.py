@@ -40,27 +40,27 @@ def save_seen(seen):
         json.dump(list(seen)[-500:], f)
 
 async def upload_photo(client, msg):
-    """Скачиваем фото и загружаем на telegra.ph"""
     try:
         img_bytes = await client.download_media(msg.media, bytes)
         if not img_bytes:
             return None
-        # Загружаем на telegra.ph
-        boundary = "----FormBoundary"
-        body = (
+        boundary = "boundary123456"
+        part1 = (
             f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="photo.jpg"\r\n'
+            f'Content-Disposition: form-data; name="file"; filename="img.jpg"\r\n'
             f"Content-Type: image/jpeg\r\n\r\n"
-        ).encode() + img_bytes + f"\r\n--{boundary}--\r\n".encode()
+        ).encode()
+        part2 = f"\r\n--{boundary}--\r\n".encode()
+        body = part1 + img_bytes + part2
         req = urllib.request.Request(
             "https://telegra.ph/upload",
             data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:
             result = json.loads(r.read())
-            if result and isinstance(result, list):
+            if result and isinstance(result, list) and "src" in result[0]:
                 return "https://telegra.ph" + result[0]["src"]
     except Exception as e:
         print(f"    Ошибка загрузки фото: {e}")
@@ -122,12 +122,11 @@ async def run():
                         if len(text) < 10:
                             continue
 
-                        # Фото — загружаем на telegra.ph
                         img_url = None
                         if msg.media and isinstance(msg.media, MessageMediaPhoto):
                             img_url = await upload_photo(client, msg)
                             if img_url:
-                                print(f"    📷 Фото загружено: {img_url}")
+                                print(f"    📷 Фото: {img_url}")
 
                         link = f"https://t.me/{ch['username']}/{msg.id}"
                         title = text[:100].split("\n")[0]
