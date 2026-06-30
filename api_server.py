@@ -50,6 +50,27 @@ def init_db():
                 cur.execute(f"ALTER TABLE news ADD COLUMN IF NOT EXISTS {col} {coltype}")
             except Exception:
                 pass
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pending_channels (
+                username TEXT PRIMARY KEY,
+                title TEXT,
+                about TEXT,
+                participants INT,
+                ai_verdict TEXT,
+                ai_reason TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS approved_channels (
+                username TEXT PRIMARY KEY,
+                name TEXT,
+                emoji TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -97,6 +118,81 @@ def push_news(data: dict):
     except Exception as e:
         print(f"Ошибка push: {e}")
     return {"ok": True, "added": added}
+
+@app.get("/pending-channels")
+def get_pending_channels():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT username, title, about, participants, ai_verdict, ai_reason, status
+            FROM pending_channels
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        channels = [{
+            "username": r[0], "title": r[1], "about": r[2],
+            "participants": r[3], "ai_verdict": r[4], "ai_reason": r[5], "status": r[6]
+        } for r in rows]
+        return {"channels": channels}
+    except Exception as e:
+        print(f"Ошибка pending-channels: {e}")
+        return {"channels": []}
+
+@app.post("/pending-channels/approve")
+def approve_channel(data: dict):
+    username = data.get("username")
+    name = data.get("name") or username
+    emoji = data.get("emoji") or "📢"
+    if not username:
+        return {"ok": False, "error": "username required"}
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO approved_channels (username, name, emoji)
+            VALUES (%s,%s,%s)
+            ON CONFLICT (username) DO NOTHING
+        """, (username, name, emoji))
+        cur.execute("UPDATE pending_channels SET status = 'approved' WHERE username = %s", (username,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/pending-channels/reject")
+def reject_channel(data: dict):
+    username = data.get("username")
+    if not username:
+        return {"ok": False, "error": "username required"}
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("UPDATE pending_channels SET status = 'rejected' WHERE username = %s", (username,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/clear")
+def clear_news():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM news")
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"ok": True, "message": "Все новости удалены"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @app.get("/news")
 def get_news():
