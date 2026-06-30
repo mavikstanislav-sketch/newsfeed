@@ -189,11 +189,16 @@ async def verify_channel_with_ai(title, about, username, sample_texts=None):
         return "unknown", ""
     try:
         import re
-        safe_title = (title or "").replace('"', "'")[:150]
-        safe_about = (about or "")[:300].replace('"', "'")
+        safe_title = (title or "").replace('"', "'").replace('\\', '/').replace('\n', ' ')[:150]
+        safe_about = (about or "")[:300].replace('"', "'").replace('\\', '/').replace('\n', ' ')
         samples_block = ""
         if sample_texts:
-            cleaned = [s.replace('"', "'")[:200] for s in sample_texts[:3] if s]
+            cleaned = []
+            for s in sample_texts[:3]:
+                if not s:
+                    continue
+                s = s.replace('"', "'").replace('\\', '/').replace('\n', ' ').replace('\r', ' ')
+                cleaned.append(s[:200])
             if cleaned:
                 samples_block = "\n\nОстанні повідомлення каналу (для аналізу теми та реальності):\n"
                 for i, s in enumerate(cleaned, 1):
@@ -700,6 +705,17 @@ async def run():
         while True:
             now = datetime.now().strftime("%H:%M")
             print("[" + now + "] Проверяю все каналы параллельно...")
+
+            # Автоматическое переподключение, если связь оборвалась
+            if not client.is_connected():
+                print("⚠️ Клиент отключён, переподключаюсь...")
+                try:
+                    await client.connect()
+                    print("✅ Переподключение успешно")
+                except Exception as e:
+                    print("Ошибка переподключения: " + str(e))
+                    await asyncio.sleep(5)
+                    continue
 
             active_channels = CHANNELS + get_approved_channels()
             tasks = [process_channel(client, ch, seen) for ch in active_channels]
