@@ -273,6 +273,7 @@ async def global_search_news(client, seen):
 
     new_items = []
     new_seen_ids = []
+    print("  [GlobalSearch] Начинаю поиск по категориям...")
 
     for category, keywords in CATEGORY_SEARCH_KEYWORDS.items():
         for kw in keywords:
@@ -289,6 +290,7 @@ async def global_search_news(client, seen):
                 ))
 
                 chats_by_id = {c.id: c for c in result.chats}
+                print("    [" + category + "] '" + kw + "' -> найдено сообщений: " + str(len(result.messages)) + ", чатов: " + str(len(result.chats)))
 
                 for msg in result.messages:
                     peer = getattr(msg, "peer_id", None)
@@ -350,6 +352,7 @@ async def global_search_news(client, seen):
                 print("    Ошибка global_search '" + kw + "': " + str(e))
                 await asyncio.sleep(2)
 
+    print("  [GlobalSearch] Завершено, новых публикаций: " + str(len(new_items)))
     return new_items, new_seen_ids
 
 async def discover_channels(client):
