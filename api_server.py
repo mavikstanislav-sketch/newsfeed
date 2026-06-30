@@ -44,6 +44,7 @@ def init_db():
             ("video_url", "TEXT"),
             ("media_type", "TEXT"),
             ("video_duration", "TEXT"),
+            ("category", "TEXT"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE news ADD COLUMN IF NOT EXISTS {col} {coltype}")
@@ -73,18 +74,19 @@ def push_news(data: dict):
         cur = conn.cursor()
         for item in new_items:
             cur.execute("""
-                INSERT INTO news (id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                INSERT INTO news (id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, category, link, time)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (id) DO UPDATE SET
                     img = EXCLUDED.img,
                     video_url = EXCLUDED.video_url,
                     media_type = EXCLUDED.media_type,
-                    video_duration = EXCLUDED.video_duration
+                    video_duration = EXCLUDED.video_duration,
+                    category = EXCLUDED.category
             """, (
                 item.get("id"), item.get("ch"), item.get("name"),
                 item.get("emoji"), item.get("title"), item.get("body"),
                 item.get("img"), item.get("video_url"), item.get("media_type"),
-                item.get("video_duration"), item.get("link"), item.get("time")
+                item.get("video_duration"), item.get("category"), item.get("link"), item.get("time")
             ))
             if cur.rowcount > 0:
                 added += 1
@@ -108,7 +110,7 @@ def get_news():
 
         # Берём все новости за 7 дней без лимита
         cur.execute("""
-            SELECT id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, link, time
+            SELECT id, ch, name, emoji, title, body, img, video_url, media_type, video_duration, category, link, time
             FROM news
             ORDER BY created_at DESC
         """)
@@ -122,7 +124,7 @@ def get_news():
                     "id": row[0], "ch": row[1], "name": row[2],
                     "emoji": row[3], "title": row[4], "body": row[5],
                     "img": row[6], "video_url": row[7], "media_type": row[8],
-                    "video_duration": row[9], "link": row[10], "time": row[11]
+                    "video_duration": row[9], "category": row[10], "link": row[11], "time": row[12]
                 })
             print(f"Отдаём из БД: {len(news)} новостей")
             return {"news": news, "total": len(news)}
