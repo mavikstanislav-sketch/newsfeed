@@ -638,6 +638,11 @@ function addCh(){
   sCh();rCh();uStats();
   ['cu','cn','ce'].forEach(id=>document.getElementById(id).value='');
   showT('Канал добавлен ✓');
+  // Сообщаем серверу, чтобы он реально начал мониторить этот канал
+  fetch(API_BASE+'/pending-channels/approve',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:u,name:n||u,emoji:e})
+  }).catch(()=>{});
 }
 function tCh(i,btn){channels[i].on=!channels[i].on;btn.className='toggle '+(channels[i].on?'on':'off');sCh();uStats();}
 function dCh(i){if(!confirm('Удалить?'))return;channels.splice(i,1);sCh();rCh();uStats();}
