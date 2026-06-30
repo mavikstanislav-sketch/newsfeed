@@ -25,8 +25,13 @@ MAX_NEWS_AGE_HOURS = 1  # только свежак
 DISCOVERY_INTERVAL_HOURS = 6  # как часто искать новые каналы
 
 DISCOVERY_KEYWORDS = [
-    "новини україна", "украина новости", "зсу новини",
-    "київ новини", "фронт україна", "втрати росії",
+    "новини україна", "украина новости",
+    "зсу новини", "фронт україна новини", "наступ зсу",
+    "київ новини",
+    "тривога новини", "шахед новини", "ракетна атака",
+    "нато допомога україні", "зброя для україни",
+    "путін кремль новини", "росія новини",
+    "приліт по росії", "удар по росії",
 ]
 
 # Ключевые слова для глобального поиска новостей по категориям (по всему Telegram)
@@ -265,95 +270,6 @@ def save_pending_channel(username, title, about, participants, verdict, reason):
         conn.close()
     except Exception as e:
         print("Ошибка save_pending_channel: " + str(e))
-
-async def global_search_news(client, seen):
-    """Ищет свежие новости по всему Telegram по ключевым словам каждой категории"""
-    from telethon.tl.functions.messages import SearchGlobalRequest
-    from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
-
-    new_items = []
-    new_seen_ids = []
-    print("  [GlobalSearch] Начинаю поиск по категориям...")
-
-    for category, keywords in CATEGORY_SEARCH_KEYWORDS.items():
-        for kw in keywords:
-            try:
-                result = await client(SearchGlobalRequest(
-                    q=kw,
-                    filter=InputMessagesFilterEmpty(),
-                    min_date=None,
-                    max_date=None,
-                    offset_rate=0,
-                    offset_peer=InputPeerEmpty(),
-                    offset_id=0,
-                    limit=GLOBAL_SEARCH_LIMIT
-                ))
-
-                chats_by_id = {c.id: c for c in result.chats}
-                print("    [" + category + "] '" + kw + "' -> найдено сообщений: " + str(len(result.messages)) + ", чатов: " + str(len(result.chats)))
-
-                for msg in result.messages:
-                    peer = getattr(msg, "peer_id", None)
-                    chan_id = getattr(peer, "channel_id", None) if peer else None
-                    if not chan_id or chan_id not in chats_by_id:
-                        continue
-                    chat = chats_by_id[chan_id]
-                    username = getattr(chat, "username", None)
-                    if not username:
-                        continue
-                    username = username.lower()
-
-                    news_id = make_id("global_" + username, msg.id)
-                    if news_id in seen:
-                        continue
-                    new_seen_ids.append(news_id)
-                    seen.add(news_id)
-
-                    if not is_fresh(msg.date):
-                        continue
-
-                    text = msg.text or msg.message or ""
-                    if len(text) < 10:
-                        continue
-
-                    if is_duplicate_news(text):
-                        continue
-
-                    # Быстрая проверка на фейк (категория уже известна из поискового запроса)
-                    _, is_fake, fake_reason = await analyze_with_ai(text, username)
-                    if is_fake:
-                        continue
-
-                    register_published_news(text)
-
-                    link = "https://t.me/" + username + "/" + str(msg.id)
-                    title = text[:100].split("\n")[0]
-                    body = text[:600]
-
-                    item = {
-                        "id": news_id,
-                        "ch": username,
-                        "name": getattr(chat, "title", username),
-                        "emoji": "🌐",
-                        "title": title,
-                        "body": body,
-                        "img": None,
-                        "video_url": None,
-                        "media_type": None,
-                        "video_duration": None,
-                        "category": category,
-                        "link": link,
-                        "time": str(msg.date),
-                    }
-                    new_items.append(item)
-
-                await asyncio.sleep(1.5)
-            except Exception as e:
-                print("    Ошибка global_search '" + kw + "': " + str(e))
-                await asyncio.sleep(2)
-
-    print("  [GlobalSearch] Завершено, новых публикаций: " + str(len(new_items)))
-    return new_items, new_seen_ids
 
 async def discover_channels(client):
     """Ищет новые каналы по ключевым словам через Telegram API"""
@@ -794,14 +710,6 @@ async def run():
             for new_items, new_seen_ids in results:
                 all_new_items.extend(new_items)
                 all_new_seen.extend(new_seen_ids)
-
-            # Глобальный поиск новостей по категориям по всему Telegram
-            try:
-                g_items, g_seen = await global_search_news(client, seen)
-                all_new_items.extend(g_items)
-                all_new_seen.extend(g_seen)
-            except Exception as e:
-                print("Ошибка global_search_news: " + str(e))
 
             if all_new_items:
                 push_to_api(all_new_items)
