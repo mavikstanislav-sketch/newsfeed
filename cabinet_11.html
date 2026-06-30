@@ -234,7 +234,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 <!-- FEED PAGE -->
 <div class="page active" id="page-feed">
   <div class="cat-bar" id="cat-bar">
-    <button class="cat-chip on" data-cat="all" onclick="setCat('all',this)">📰 Все</button>
     <button class="cat-chip" data-cat="front" onclick="setCat('front',this)">⚔️ Фронт</button>
     <button class="cat-chip" data-cat="kyiv" onclick="setCat('kyiv',this)">🏙 Київ</button>
     <button class="cat-chip" data-cat="alarm" onclick="setCat('alarm',this)">🚨 Тривога</button>
@@ -410,9 +409,14 @@ function pg(name,el){
 }
 
 function setCat(cat,el){
-  filt=cat;
-  document.querySelectorAll('.cat-chip').forEach(b=>b.classList.remove('on'));
-  if(el)el.classList.add('on');
+  if(filt===cat){
+    filt='all';
+    document.querySelectorAll('.cat-chip').forEach(b=>b.classList.remove('on'));
+  } else {
+    filt=cat;
+    document.querySelectorAll('.cat-chip').forEach(b=>b.classList.remove('on'));
+    if(el)el.classList.add('on');
+  }
   rFeed();
 }
 
