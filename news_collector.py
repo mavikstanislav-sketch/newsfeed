@@ -692,65 +692,89 @@ async def run():
     seen = load_seen()
     print("Запускаю Telethon...")
 
-    async with TelegramClient(SESSION, API_ID, API_HASH) as client:
-        print("Telethon подключён!")
+    client = TelegramClient(SESSION, API_ID, API_HASH)
 
+    # Устойчивое подключение: при AuthKeyDuplicatedError во время rolling-деплоя
+    # (старый и новый контейнер на секунды пересекаются) — просто ждём и пробуем снова,
+    # вместо того чтобы падать и перезапускаться через Railway Restart Policy.
+    connected = False
+    attempt = 0
+    while not connected:
         try:
-            await send_tg("NewsFeed с AI категориями запущен! 🚀")
+            await client.connect()
+            if not await client.is_user_authorized():
+                print("⚠️ Сессия не авторизована — нужна новая QR-авторизация")
+            connected = True
         except Exception as e:
-            print("Ошибка Telegram: " + str(e))
+            attempt += 1
+            wait_s = min(10 + attempt * 5, 60)
+            print("⚠️ Не удалось подключиться (" + type(e).__name__ + "), попытка " + str(attempt) + ", жду " + str(wait_s) + " сек...")
+            await asyncio.sleep(wait_s)
 
-        last_discovery = datetime.now() - timedelta(hours=DISCOVERY_INTERVAL_HOURS)  # сразу при старте
+    print("Telethon подключён!")
 
-        while True:
-            now = datetime.now().strftime("%H:%M")
-            print("[" + now + "] Проверяю все каналы параллельно...")
+    try:
+        await send_tg("NewsFeed с AI категориями запущен! 🚀")
+    except Exception as e:
+        print("Ошибка Telegram: " + str(e))
 
-            # Автоматическое переподключение, если связь оборвалась
-            if not client.is_connected():
-                print("⚠️ Клиент отключён, переподключаюсь...")
+    last_discovery = datetime.now() - timedelta(hours=DISCOVERY_INTERVAL_HOURS)  # сразу при старте
+
+    while True:
+        now = datetime.now().strftime("%H:%M")
+        print("[" + now + "] Проверяю все каналы параллельно...")
+
+        # Автоматическое переподключение, если связь оборвалась
+        if not client.is_connected():
+            print("⚠️ Клиент отключён, переподключаюсь...")
+            try:
+                await client.connect()
+                print("✅ Переподключение успешно")
+            except Exception as e:
+                print("Ошибка переподключения: " + str(e))
+                await asyncio.sleep(10)
+                continue
+
+        active_channels = CHANNELS + get_approved_channels()
+        tasks = [process_channel(client, ch, seen) for ch in active_channels]
+        results = await asyncio.gather(*tasks)
+
+        all_new_items = []
+        all_new_seen = []
+
+        for new_items, new_seen_ids in results:
+            all_new_items.extend(new_items)
+            all_new_seen.extend(new_seen_ids)
+
+        if all_new_items:
+            push_to_api(all_new_items)
+            for item in all_new_items[:2]:
+                cat_emoji = CATEGORY_EMOJI.get(item.get("category", ""), "📰")
+                msg_text = (
+                    cat_emoji + " " + item["emoji"] + " <b>@" + item["ch"] + "</b>\n\n"
+                    + "<b>" + item["title"] + "</b>\n\n"
+                    + item["body"][:400] + "\n\n"
+                    + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
+                )
                 try:
-                    await client.connect()
-                    print("✅ Переподключение успешно")
-                except Exception as e:
-                    print("Ошибка переподключения: " + str(e))
-                    await asyncio.sleep(5)
-                    continue
-
-            active_channels = CHANNELS + get_approved_channels()
-            tasks = [process_channel(client, ch, seen) for ch in active_channels]
-            results = await asyncio.gather(*tasks)
-
-            all_new_items = []
-            all_new_seen = []
-
-            for new_items, new_seen_ids in results:
-                all_new_items.extend(new_items)
-                all_new_seen.extend(new_seen_ids)
-
-            if all_new_items:
-                push_to_api(all_new_items)
-                for item in all_new_items[:2]:
-                    cat_emoji = CATEGORY_EMOJI.get(item.get("category", ""), "📰")
-                    msg_text = (
-                        cat_emoji + " " + item["emoji"] + " <b>@" + item["ch"] + "</b>\n\n"
-                        + "<b>" + item["title"] + "</b>\n\n"
-                        + item["body"][:400] + "\n\n"
-                        + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
-                    )
                     await send_tg(msg_text)
-                    await asyncio.sleep(2)
+                except Exception as e:
+                    print("Ошибка send_tg: " + str(e))
+                await asyncio.sleep(2)
 
-            if all_new_seen:
-                save_seen_ids(all_new_seen)
+        if all_new_seen:
+            save_seen_ids(all_new_seen)
 
-            # Поиск новых каналов раз в DISCOVERY_INTERVAL_HOURS
-            if datetime.now() - last_discovery >= timedelta(hours=DISCOVERY_INTERVAL_HOURS):
+        # Поиск новых каналов раз в DISCOVERY_INTERVAL_HOURS
+        if datetime.now() - last_discovery >= timedelta(hours=DISCOVERY_INTERVAL_HOURS):
+            try:
                 await discover_channels(client)
-                last_discovery = datetime.now()
+            except Exception as e:
+                print("Ошибка discover_channels: " + str(e))
+            last_discovery = datetime.now()
 
-            print("Жду " + str(CHECK_INTERVAL) + " сек...\n")
-            await asyncio.sleep(CHECK_INTERVAL)
+        print("Жду " + str(CHECK_INTERVAL) + " сек...\n")
+        await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     asyncio.run(run())
