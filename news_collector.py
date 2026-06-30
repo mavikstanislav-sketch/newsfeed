@@ -18,16 +18,16 @@ SESSION  = "news_session"
 DATABASE_URL = os.environ.get("PG_URL", "")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
-CHANNELS = [
-    {"username": "ssternenko",     "name": "Стерненко",     "emoji": "🇺🇦"},
-    {"username": "vach_govorit",   "name": "Вач говорит",   "emoji": "🎙"},
-    {"username": "lachentyt",      "name": "Лаченко",       "emoji": "📢"},
-    {"username": "vanek_nikolaev", "name": "Ваня Николаев", "emoji": "👤"},
-    {"username": "truexanewsua",   "name": "TrueXA News",   "emoji": "📰"},
-]
+CHANNELS = []
 
 CHECK_INTERVAL = 10
 MAX_NEWS_AGE_HOURS = 1  # только свежак
+DISCOVERY_INTERVAL_HOURS = 6  # как часто искать новые каналы
+
+DISCOVERY_KEYWORDS = [
+    "новини україна", "украина новости", "зсу новини",
+    "київ новини", "фронт україна", "втрати росії",
+]
 
 CATEGORY_EMOJI = {
     "front": "⚔️",
@@ -102,6 +102,190 @@ def save_seen_ids(new_ids):
 
 def make_id(channel, msg_id):
     return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
+
+def init_pending_table():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pending_channels (
+                username TEXT PRIMARY KEY,
+                title TEXT,
+                about TEXT,
+                participants INT,
+                ai_verdict TEXT,
+                ai_reason TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS approved_channels (
+                username TEXT PRIMARY KEY,
+                name TEXT,
+                emoji TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("Таблицы discovery готовы!")
+    except Exception as e:
+        print("Ошибка init discovery: " + str(e))
+
+def get_known_usernames():
+    """Уже отслеживаемые + уже предложенные каналы — чтобы не дублировать"""
+    known = set(ch["username"] for ch in CHANNELS)
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT username FROM pending_channels")
+        known.update(row[0] for row in cur.fetchall())
+        cur.execute("SELECT username FROM approved_channels")
+        known.update(row[0] for row in cur.fetchall())
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Ошибка get_known_usernames: " + str(e))
+    return known
+
+def get_approved_channels():
+    """Каналы, подтверждённые пользователем через кабинет — добавляются к мониторингу"""
+    extra = []
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT username, name, emoji FROM approved_channels")
+        for row in cur.fetchall():
+            extra.append({"username": row[0], "name": row[1] or row[0], "emoji": row[2] or "📢"})
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Ошибка get_approved_channels: " + str(e))
+    return extra
+
+async def verify_channel_with_ai(title, about, username):
+    """AI оценивает, является ли канал реальным украинским новостным каналом"""
+    if not CLAUDE_API_KEY:
+        return "unknown", ""
+    try:
+        prompt = """Оціни Telegram-канал як можливе джерело українських новин.
+
+Назва каналу: """ + (title or "") + """
+Опис каналу: """ + (about or "")[:300] + """
+Username: @""" + username + """
+
+Визнач:
+1. verdict: "good" (реальний український новинний канал, варто додати), "bad" (спам, бот, реклама, не новинний, не український, дублікат відомого великого ЗМІ) 
+2. reason: коротко чому
+
+Відповідай СУВОРО у форматі JSON:
+{"verdict": "good/bad", "reason": "коротко"}"""
+
+        data = json.dumps({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            result = json.loads(r.read())
+            txt = result["content"][0]["text"].strip()
+            if "```" in txt:
+                txt = txt.split("```")[1].replace("json", "").strip()
+            parsed = json.loads(txt)
+            return parsed.get("verdict", "unknown"), parsed.get("reason", "")
+    except Exception as e:
+        print("    Ошибка AI verify: " + str(e))
+        return "unknown", ""
+
+def save_approved_channel(username, title):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO approved_channels (username, name, emoji)
+            VALUES (%s,%s,%s)
+            ON CONFLICT (username) DO NOTHING
+        """, (username, title or username, "📢"))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Ошибка save_approved_channel: " + str(e))
+
+def save_pending_channel(username, title, about, participants, verdict, reason):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        status = "approved" if verdict == "good" else "pending"
+        cur.execute("""
+            INSERT INTO pending_channels (username, title, about, participants, ai_verdict, ai_reason, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (username) DO NOTHING
+        """, (username, title, about, participants, verdict, reason, status))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Ошибка save_pending_channel: " + str(e))
+
+async def discover_channels(client):
+    """Ищет новые каналы по ключевым словам через Telegram API"""
+    print("[Discovery] Запускаю поиск новых каналов...")
+    known = get_known_usernames()
+    found_count = 0
+    try:
+        from telethon.tl.functions.contacts import SearchRequest
+        for kw in DISCOVERY_KEYWORDS:
+            try:
+                result = await client(SearchRequest(q=kw, limit=15))
+                for chat in result.chats:
+                    username = getattr(chat, "username", None)
+                    if not username:
+                        continue
+                    username = username.lower()
+                    if username in known:
+                        continue
+                    is_channel = chat.__class__.__name__ == "Channel" and getattr(chat, "broadcast", False)
+                    if not is_channel:
+                        continue
+                    known.add(username)
+
+                    title = getattr(chat, "title", "") or ""
+                    participants = getattr(chat, "participants_count", 0) or 0
+                    about = ""
+                    try:
+                        full = await client.get_entity(username)
+                        about = ""  # доп. описание можно получить отдельным запросом при необходимости
+                    except Exception:
+                        pass
+
+                    verdict, reason = await verify_channel_with_ai(title, about, username)
+                    save_pending_channel(username, title, about, participants, verdict, reason)
+                    if verdict == "good":
+                        save_approved_channel(username, title)
+                        print("    ✅ Автоматически добавлен @" + username + " (" + title + ")")
+                    else:
+                        print("    Найден канал @" + username + " (" + title + ") -> " + verdict + " (не добавлен)")
+                    found_count += 1
+                await asyncio.sleep(2)
+            except Exception as e:
+                print("    Ошибка поиска по '" + kw + "': " + str(e))
+                await asyncio.sleep(3)
+    except Exception as e:
+        print("Ошибка discover_channels: " + str(e))
+    print("[Discovery] Поиск завершён, найдено новых: " + str(found_count))
 
 def is_fresh(msg_date):
     """Проверка: новость не старше MAX_NEWS_AGE_HOURS"""
@@ -196,6 +380,45 @@ def get_category_simple(text):
             if kw in text_lower:
                 return cat
     return None  # не подходит ни под одну — не публикуем
+
+# === ДЕДУПЛИКАЦИЯ ПОХОЖИХ НОВОСТЕЙ ===
+recent_published = []  # список (timestamp, set_слов, text)
+DEDUP_SIMILARITY_THRESHOLD = 0.55  # доля общих слов, выше которой считаем дублем
+DEDUP_WINDOW_HOURS = 1
+
+def normalize_words(text):
+    import re
+    text = text.lower()
+    text = re.sub(r'[^\w\sа-яіїєґa-z0-9]', ' ', text)
+    words = [w for w in text.split() if len(w) > 3]
+    return set(words)
+
+def prune_recent_published():
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=DEDUP_WINDOW_HOURS)
+    while recent_published and recent_published[0][0] < cutoff:
+        recent_published.pop(0)
+
+def is_duplicate_news(text):
+    """Проверяет, не публиковалась ли уже похожая новость за последний час"""
+    prune_recent_published()
+    words = normalize_words(text)
+    if not words:
+        return False
+    for _, other_words, _ in recent_published:
+        if not other_words:
+            continue
+        overlap = len(words & other_words)
+        union = len(words | other_words)
+        if union == 0:
+            continue
+        similarity = overlap / union
+        if similarity >= DEDUP_SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+def register_published_news(text):
+    recent_published.append((datetime.now(timezone.utc), normalize_words(text), text))
 
 def get_video_duration(msg):
     try:
@@ -381,6 +604,12 @@ async def process_channel(client, ch, seen):
                 print("    Пропуск: похоже на фейк (" + fake_reason + ")")
                 continue
 
+            # Дубликат уже опубликованной новости (та же тема из другого канала)
+            if is_duplicate_news(text):
+                print("    Пропуск: дубликат уже опубликованной новости")
+                continue
+            register_published_news(text)
+
             link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
             title = text[:100].split("\n")[0]
             body = text[:600]
@@ -414,6 +643,7 @@ async def process_channel(client, ch, seen):
 
 async def run():
     init_seen_table()
+    init_pending_table()
     seen = load_seen()
     print("Запускаю Telethon...")
 
@@ -425,11 +655,14 @@ async def run():
         except Exception as e:
             print("Ошибка Telegram: " + str(e))
 
+        last_discovery = datetime.now() - timedelta(hours=DISCOVERY_INTERVAL_HOURS)  # сразу при старте
+
         while True:
             now = datetime.now().strftime("%H:%M")
             print("[" + now + "] Проверяю все каналы параллельно...")
 
-            tasks = [process_channel(client, ch, seen) for ch in CHANNELS]
+            active_channels = CHANNELS + get_approved_channels()
+            tasks = [process_channel(client, ch, seen) for ch in active_channels]
             results = await asyncio.gather(*tasks)
 
             all_new_items = []
@@ -454,6 +687,11 @@ async def run():
 
             if all_new_seen:
                 save_seen_ids(all_new_seen)
+
+            # Поиск новых каналов раз в DISCOVERY_INTERVAL_HOURS
+            if datetime.now() - last_discovery >= timedelta(hours=DISCOVERY_INTERVAL_HOURS):
+                await discover_channels(client)
+                last_discovery = datetime.now()
 
             print("Жду " + str(CHECK_INTERVAL) + " сек...\n")
             await asyncio.sleep(CHECK_INTERVAL)
