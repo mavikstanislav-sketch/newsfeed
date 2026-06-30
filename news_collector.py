@@ -29,6 +29,17 @@ DISCOVERY_KEYWORDS = [
     "київ новини", "фронт україна", "втрати росії",
 ]
 
+# Ключевые слова для глобального поиска новостей по категориям (по всему Telegram)
+CATEGORY_SEARCH_KEYWORDS = {
+    "front":   ["фронт зсу наступ", "бригада позиції бої"],
+    "kyiv":    ["київ новини сьогодні"],
+    "alarm":   ["тривога шахед ракета"],
+    "allies":  ["сша нато допомога зброя"],
+    "russia":  ["кремль путін росія"],
+    "strikes": ["приліт удар по росії"],
+}
+GLOBAL_SEARCH_LIMIT = 8
+
 CATEGORY_EMOJI = {
     "front": "⚔️",
     "kyiv": "🏙",
@@ -165,22 +176,31 @@ def get_approved_channels():
         print("Ошибка get_approved_channels: " + str(e))
     return extra
 
-async def verify_channel_with_ai(title, about, username):
-    """AI оценивает, является ли канал реальным украинским новостным каналом"""
+async def verify_channel_with_ai(title, about, username, sample_texts=None):
+    """AI оценивает, является ли канал реальним українським новинним каналом,
+    анализируя название и образцы последних сообщений (на консистентность теми)"""
     if not CLAUDE_API_KEY:
         return "unknown", ""
     try:
         import re
         safe_title = (title or "").replace('"', "'")[:150]
         safe_about = (about or "")[:300].replace('"', "'")
+        samples_block = ""
+        if sample_texts:
+            cleaned = [s.replace('"', "'")[:200] for s in sample_texts[:3] if s]
+            if cleaned:
+                samples_block = "\n\nОстанні повідомлення каналу (для аналізу теми та реальності):\n"
+                for i, s in enumerate(cleaned, 1):
+                    samples_block += str(i) + ". " + s + "\n"
 
         prompt = ("Оціни Telegram-канал як можливе джерело українських новин.\n\n"
                    "Назва каналу: " + safe_title + "\n"
                    "Опис каналу: " + safe_about + "\n"
-                   "Username: @" + username + "\n\n"
+                   "Username: @" + username + samples_block + "\n\n"
                    "Визнач:\n"
-                   "1. verdict: \"good\" (реальний український новинний канал, варто додати), "
-                   "\"bad\" (спам, бот, реклама, не новинний, не український, дублікат відомого великого ЗМІ)\n"
+                   "1. verdict: \"good\" якщо канал РЕГУЛЯРНО публікує реальні українські новини "
+                   "(судячи з прикладів повідомлень — це не реклама, не спам, не бот, не флуд, а саме новини), "
+                   "\"bad\" якщо це спам/реклама/бот/не новинний/не український/нерелевантний\n"
                    "2. reason: коротко чому\n\n"
                    "Відповідай СУВОРО у форматі JSON, без жодного додаткового тексту:\n"
                    "{\"verdict\": \"good\", \"reason\": \"коротко\"}")
@@ -246,6 +266,92 @@ def save_pending_channel(username, title, about, participants, verdict, reason):
     except Exception as e:
         print("Ошибка save_pending_channel: " + str(e))
 
+async def global_search_news(client, seen):
+    """Ищет свежие новости по всему Telegram по ключевым словам каждой категории"""
+    from telethon.tl.functions.messages import SearchGlobalRequest
+    from telethon.tl.types import InputMessagesFilterEmpty
+
+    new_items = []
+    new_seen_ids = []
+
+    for category, keywords in CATEGORY_SEARCH_KEYWORDS.items():
+        for kw in keywords:
+            try:
+                result = await client(SearchGlobalRequest(
+                    q=kw,
+                    filter=InputMessagesFilterEmpty(),
+                    min_date=None,
+                    max_date=None,
+                    offset_rate=0,
+                    offset_peer=await client.get_input_entity('me'),
+                    offset_id=0,
+                    limit=GLOBAL_SEARCH_LIMIT
+                ))
+
+                chats_by_id = {c.id: c for c in result.chats}
+
+                for msg in result.messages:
+                    peer = getattr(msg, "peer_id", None)
+                    chan_id = getattr(peer, "channel_id", None) if peer else None
+                    if not chan_id or chan_id not in chats_by_id:
+                        continue
+                    chat = chats_by_id[chan_id]
+                    username = getattr(chat, "username", None)
+                    if not username:
+                        continue
+                    username = username.lower()
+
+                    news_id = make_id("global_" + username, msg.id)
+                    if news_id in seen:
+                        continue
+                    new_seen_ids.append(news_id)
+                    seen.add(news_id)
+
+                    if not is_fresh(msg.date):
+                        continue
+
+                    text = msg.text or msg.message or ""
+                    if len(text) < 10:
+                        continue
+
+                    if is_duplicate_news(text):
+                        continue
+
+                    # Быстрая проверка на фейк (категория уже известна из поискового запроса)
+                    _, is_fake, fake_reason = await analyze_with_ai(text, username)
+                    if is_fake:
+                        continue
+
+                    register_published_news(text)
+
+                    link = "https://t.me/" + username + "/" + str(msg.id)
+                    title = text[:100].split("\n")[0]
+                    body = text[:600]
+
+                    item = {
+                        "id": news_id,
+                        "ch": username,
+                        "name": getattr(chat, "title", username),
+                        "emoji": "🌐",
+                        "title": title,
+                        "body": body,
+                        "img": None,
+                        "video_url": None,
+                        "media_type": None,
+                        "video_duration": None,
+                        "category": category,
+                        "link": link,
+                        "time": str(msg.date),
+                    }
+                    new_items.append(item)
+
+                await asyncio.sleep(1.5)
+            except Exception as e:
+                print("    Ошибка global_search '" + kw + "': " + str(e))
+                await asyncio.sleep(2)
+
+    return new_items, new_seen_ids
+
 async def discover_channels(client):
     """Ищет новые каналы по ключевым словам через Telegram API"""
     print("[Discovery] Запускаю поиск новых каналов...")
@@ -271,13 +377,17 @@ async def discover_channels(client):
                     title = getattr(chat, "title", "") or ""
                     participants = getattr(chat, "participants_count", 0) or 0
                     about = ""
+                    sample_texts = []
                     try:
-                        full = await client.get_entity(username)
-                        about = ""  # доп. описание можно получить отдельным запросом при необходимости
+                        recent_msgs = await client.get_messages(username, limit=5)
+                        for m in recent_msgs:
+                            t = m.text or m.message or ""
+                            if len(t) > 15:
+                                sample_texts.append(t)
                     except Exception:
                         pass
 
-                    verdict, reason = await verify_channel_with_ai(title, about, username)
+                    verdict, reason = await verify_channel_with_ai(title, about, username, sample_texts)
                     save_pending_channel(username, title, about, participants, verdict, reason)
                     if verdict == "good":
                         save_approved_channel(username, title)
@@ -681,6 +791,14 @@ async def run():
             for new_items, new_seen_ids in results:
                 all_new_items.extend(new_items)
                 all_new_seen.extend(new_seen_ids)
+
+            # Глобальный поиск новостей по категориям по всему Telegram
+            try:
+                g_items, g_seen = await global_search_news(client, seen)
+                all_new_items.extend(g_items)
+                all_new_seen.extend(g_seen)
+            except Exception as e:
+                print("Ошибка global_search_news: " + str(e))
 
             if all_new_items:
                 push_to_api(all_new_items)
