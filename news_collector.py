@@ -243,7 +243,7 @@ async def verify_channel_with_ai(title, about, username, sample_texts=None):
             parsed = json.loads(txt)
             return parsed.get("verdict", "unknown"), parsed.get("reason", "")
     except Exception as e:
-        print("    Ошибка AI verify: " + str(e))
+        print("    Ошибка AI verify (" + username + "): " + type(e).__name__ + ": " + str(e))
         return "unknown", ""
 
 def save_approved_channel(username, title):
