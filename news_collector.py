@@ -21,7 +21,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CHANNELS = []
 
 CHECK_INTERVAL = 10
-MAX_NEWS_AGE_HOURS = 1  # только свежак
+MAX_NEWS_AGE_HOURS = 6  # временно расширено для проверки (было 1)
 DISCOVERY_INTERVAL_HOURS = 6  # как часто искать новые каналы
 
 DISCOVERY_KEYWORDS = [
