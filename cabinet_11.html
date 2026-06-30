@@ -206,6 +206,20 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 .toast.show{opacity:1}
 #avatar-input{display:none}
 
+/* PENDING CHANNELS */
+.pending-card{background:var(--s2);border:1px solid var(--border2);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.pending-title{font-size:14px;font-weight:600;margin-bottom:2px}
+.pending-sub{font-size:11px;color:var(--t3);margin-bottom:6px}
+.pending-reason{font-size:12px;color:var(--t2);margin-bottom:10px;line-height:1.4}
+.pending-actions{display:flex;gap:8px}
+.pending-btn{flex:1;padding:8px;border-radius:9px;border:none;font-size:13px;font-weight:600;font-family:var(--sans);cursor:pointer}
+.pending-btn.approve{background:var(--green);color:#0e1621}
+.pending-btn.reject{background:var(--s3);color:var(--t2)}
+.pending-badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:8px;margin-bottom:6px}
+.pending-badge.good{background:rgba(77,205,94,0.15);color:var(--green)}
+.pending-badge.bad{background:rgba(224,85,85,0.15);color:var(--red)}
+.pending-badge.unknown{background:var(--s3);color:var(--t3)}
+
 /* DESKTOP / WIDE SCREEN LAYOUT */
 @media (min-width: 700px){
   body{display:flex;flex-direction:column;align-items:center}
@@ -287,6 +301,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
       <input class="inp" id="ce" placeholder="Эмодзи">
       <button class="btn-add" onclick="addCh()">Добавить</button>
     </div>
+  </div>
+  <div class="section" id="pending-section" style="display:none">
+    <div class="section-title">🤖 Предложено AI</div>
+    <div id="pending-list"></div>
   </div>
   <div id="ch-list"></div>
 </div>
@@ -430,7 +448,7 @@ function pg(name,el){
   const subs={feed:'все новости',fav:'сохранённые',channels:'управление',profile:'настройки'};
   document.getElementById('topbar-title').textContent=titles[name]||name;
   document.getElementById('topbar-sub').textContent=subs[name]||'';
-  if(name==='channels')rCh();
+  if(name==='channels'){rCh();loadPending();}
   if(name==='profile')rPro();
   if(name==='fav')rFav();
   uStats();
@@ -625,6 +643,64 @@ function tCh(i,btn){channels[i].on=!channels[i].on;btn.className='toggle '+(chan
 function dCh(i){if(!confirm('Удалить?'))return;channels.splice(i,1);sCh();rCh();uStats();}
 function sCh(){localStorage.setItem('nf_ch',JSON.stringify(channels));}
 
+const API_BASE='https://newsfeed-production-9b3b.up.railway.app';
+
+async function loadPending(){
+  const sec=document.getElementById('pending-section');
+  const list=document.getElementById('pending-list');
+  try{
+    const r=await fetch(API_BASE+'/pending-channels');
+    const d=await r.json();
+    const items=(d.channels||[]).filter(c=>c.ai_verdict!=='bad');
+    if(!items.length){sec.style.display='none';return;}
+    sec.style.display='block';
+    list.innerHTML='';
+    items.forEach(c=>{
+      const badgeClass=c.ai_verdict==='good'?'good':(c.ai_verdict==='bad'?'bad':'unknown');
+      const badgeText=c.ai_verdict==='good'?'AI рекомендує':(c.ai_verdict==='bad'?'AI не радить':'Невідомо');
+      const card=mk('div','pending-card');
+      card.innerHTML=`
+        <span class="pending-badge ${badgeClass}">${badgeText}</span>
+        <div class="pending-title">${c.title||c.username}</div>
+        <div class="pending-sub">@${c.username}${c.participants?' · '+c.participants+' підписників':''}</div>
+        ${c.ai_reason?`<div class="pending-reason">${c.ai_reason}</div>`:''}
+        <div class="pending-actions">
+          <button class="pending-btn approve" onclick="approvePending('${c.username}','${(c.title||c.username).replace(/'/g,"")}')">Додати</button>
+          <button class="pending-btn reject" onclick="rejectPending('${c.username}')">Відхилити</button>
+        </div>`;
+      list.appendChild(card);
+    });
+  }catch(e){
+    sec.style.display='none';
+  }
+}
+
+async function approvePending(username,title){
+  try{
+    await fetch(API_BASE+'/pending-channels/approve',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username,name:title,emoji:'📢'})
+    });
+    if(!channels.find(c=>c.username===username)){
+      channels.push({id:Date.now(),username,name:title,emoji:'📢',on:true,color:CH_COLORS[channels.length%CH_COLORS.length]});
+      sCh();rCh();uStats();
+    }
+    showT('Канал добавлен ✓');
+    loadPending();
+  }catch(e){showT('Ошибка');}
+}
+
+async function rejectPending(username){
+  try{
+    await fetch(API_BASE+'/pending-channels/reject',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username})
+    });
+    showT('Отклонено');
+    loadPending();
+  }catch(e){showT('Ошибка');}
+}
+
 function rPro(){
   document.getElementById('prof-name').value=profile.name||'Мой кабинет';
   const today=new Date().toISOString().slice(0,10);
@@ -677,6 +753,27 @@ async function loadFeed(){
       link:item.link,
       reactions:{like:Math.floor(Math.random()*80),fire:Math.floor(Math.random()*50),heart:Math.floor(Math.random()*60)}
     }));
+
+    // Автоматически добавляем в локальный список любые новые каналы, найденные в новостях
+    let channelsChanged=false;
+    const seenUsernames=new Set();
+    news.forEach(item=>{
+      if(seenUsernames.has(item.ch))return;
+      seenUsernames.add(item.ch);
+      if(!channels.find(c=>c.username===item.ch)){
+        channels.push({
+          id:Date.now()+Math.floor(Math.random()*1000),
+          username:item.ch,
+          name:(item.name||item.ch).slice(0,40),
+          emoji:item.emoji||'📢',
+          on:true,
+          color:CH_COLORS[channels.length%CH_COLORS.length]
+        });
+        channelsChanged=true;
+      }
+    });
+    if(channelsChanged)sCh();
+
     rFeed();
     showT('Загружено '+news.length+' новостей ✓');
   }catch(e){
