@@ -31,12 +31,12 @@ DISCOVERY_KEYWORDS = [
 
 # Ключевые слова для глобального поиска новостей по категориям (по всему Telegram)
 CATEGORY_SEARCH_KEYWORDS = {
-    "front":   ["фронт зсу наступ", "бригада позиції бої"],
-    "kyiv":    ["київ новини сьогодні"],
-    "alarm":   ["тривога шахед ракета"],
-    "allies":  ["сша нато допомога зброя"],
-    "russia":  ["кремль путін росія"],
-    "strikes": ["приліт удар по росії"],
+    "front":   ["фронт", "зсу", "наступ"],
+    "kyiv":    ["київ"],
+    "alarm":   ["тривога", "шахед", "ракета"],
+    "allies":  ["нато", "зброя"],
+    "russia":  ["кремль", "путін"],
+    "strikes": ["приліт"],
 }
 GLOBAL_SEARCH_LIMIT = 8
 
@@ -269,7 +269,7 @@ def save_pending_channel(username, title, about, participants, verdict, reason):
 async def global_search_news(client, seen):
     """Ищет свежие новости по всему Telegram по ключевым словам каждой категории"""
     from telethon.tl.functions.messages import SearchGlobalRequest
-    from telethon.tl.types import InputMessagesFilterEmpty
+    from telethon.tl.types import InputMessagesFilterEmpty, InputPeerEmpty
 
     new_items = []
     new_seen_ids = []
@@ -284,7 +284,7 @@ async def global_search_news(client, seen):
                     min_date=None,
                     max_date=None,
                     offset_rate=0,
-                    offset_peer=await client.get_input_entity('me'),
+                    offset_peer=InputPeerEmpty(),
                     offset_id=0,
                     limit=GLOBAL_SEARCH_LIMIT
                 ))
