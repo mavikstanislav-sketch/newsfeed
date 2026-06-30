@@ -170,18 +170,20 @@ async def verify_channel_with_ai(title, about, username):
     if not CLAUDE_API_KEY:
         return "unknown", ""
     try:
-        prompt = """Оціни Telegram-канал як можливе джерело українських новин.
+        import re
+        safe_title = (title or "").replace('"', "'")[:150]
+        safe_about = (about or "")[:300].replace('"', "'")
 
-Назва каналу: """ + (title or "") + """
-Опис каналу: """ + (about or "")[:300] + """
-Username: @""" + username + """
-
-Визнач:
-1. verdict: "good" (реальний український новинний канал, варто додати), "bad" (спам, бот, реклама, не новинний, не український, дублікат відомого великого ЗМІ) 
-2. reason: коротко чому
-
-Відповідай СУВОРО у форматі JSON:
-{"verdict": "good/bad", "reason": "коротко"}"""
+        prompt = ("Оціни Telegram-канал як можливе джерело українських новин.\n\n"
+                   "Назва каналу: " + safe_title + "\n"
+                   "Опис каналу: " + safe_about + "\n"
+                   "Username: @" + username + "\n\n"
+                   "Визнач:\n"
+                   "1. verdict: \"good\" (реальний український новинний канал, варто додати), "
+                   "\"bad\" (спам, бот, реклама, не новинний, не український, дублікат відомого великого ЗМІ)\n"
+                   "2. reason: коротко чому\n\n"
+                   "Відповідай СУВОРО у форматі JSON, без жодного додаткового тексту:\n"
+                   "{\"verdict\": \"good\", \"reason\": \"коротко\"}")
 
         data = json.dumps({
             "model": "claude-sonnet-4-6",
@@ -203,6 +205,10 @@ Username: @""" + username + """
             txt = result["content"][0]["text"].strip()
             if "```" in txt:
                 txt = txt.split("```")[1].replace("json", "").strip()
+            # Достаём именно JSON-объект, даже если вокруг есть лишний текст
+            match = re.search(r'\{.*\}', txt, re.DOTALL)
+            if match:
+                txt = match.group(0)
             parsed = json.loads(txt)
             return parsed.get("verdict", "unknown"), parsed.get("reason", "")
     except Exception as e:
@@ -348,6 +354,10 @@ none = якщо новина НЕ підходить під жодну з кат
             txt = result["content"][0]["text"].strip()
             if "```" in txt:
                 txt = txt.split("```")[1].replace("json", "").strip()
+            import re as _re
+            match = _re.search(r'\{.*\}', txt, _re.DOTALL)
+            if match:
+                txt = match.group(0)
             parsed = json.loads(txt)
             category = parsed.get("category", "none")
             is_fake = bool(parsed.get("is_fake", False))
