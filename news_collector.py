@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import urllib.request
 import urllib.parse
 from telethon import TelegramClient
@@ -27,6 +27,18 @@ CHANNELS = [
 ]
 
 CHECK_INTERVAL = 10
+MAX_NEWS_AGE_HOURS = 1  # только свежак
+
+CATEGORY_EMOJI = {
+    "front": "⚔️",
+    "kyiv": "🏙",
+    "alarm": "🚨",
+    "allies": "🤝",
+    "russia": "🇷🇺",
+    "strikes": "💥",
+}
+
+VALID_CATEGORIES = set(CATEGORY_EMOJI.keys())
 
 def get_db():
     url = DATABASE_URL
@@ -91,31 +103,45 @@ def save_seen_ids(new_ids):
 def make_id(channel, msg_id):
     return hashlib.md5((channel + str(msg_id)).encode()).hexdigest()[:16]
 
-async def analyze_with_ai(text, channel):
-    """Claude анализирует новость — категория + фейк"""
-    if not CLAUDE_API_KEY:
-        return get_category_simple(text), "unknown", ""
+def is_fresh(msg_date):
+    """Проверка: новость не старше MAX_NEWS_AGE_HOURS"""
     try:
-        prompt = """Проаналізуй цю новину з українського Telegram каналу.
+        now = datetime.now(timezone.utc)
+        if msg_date.tzinfo is None:
+            msg_date = msg_date.replace(tzinfo=timezone.utc)
+        age = now - msg_date
+        return age <= timedelta(hours=MAX_NEWS_AGE_HOURS)
+    except Exception:
+        return True  # если не смогли посчитать — пропускаем, не блокируем
+
+async def analyze_with_ai(text, channel):
+    """
+    Claude анализирует новость — категория + фейк.
+    Возвращает (category или None, is_fake, fake_reason).
+    category=None означает "не подходит ни под одну из 6 категорий" -> не публикуем.
+    """
+    if not CLAUDE_API_KEY:
+        return get_category_simple(text), False, ""
+    try:
+        prompt = """Ти — модератор українського новинного Telegram-каналу. Проаналізуй текст новини.
 
 Новина від @""" + channel + """:
-""" + text[:500] + """
+\"\"\"""" + text[:500] + """\"\"\"
 
-Відповідай ТІЛЬКИ у форматі JSON без зайвого тексту:
-{
-  "category": "одна з: front / kyiv / alarm / allies / russia / strikes / general",
-  "is_fake": "true або false",
-  "fake_reason": "коротко чому фейк або порожньо"
-}
+Визнач:
+1. Категорію (ОБЕРИ ОДНУ, найбільш відповідну):
+front = бойові дії, наступ, ЗСУ, бригади, позиції, фронт
+kyiv = новини про Київ, столицю
+alarm = повітряна тривога, ракети, шахеди, БпЛА, вибухи, ППО, обстріл
+allies = допомога від США/НАТО, зброя, заяви політиків-союзників
+russia = новини про Москву, Кремль, Путіна, внутрішні події в РФ
+strikes = удари по території Росії, атаки БПЛА на РФ, прильоти в РФ
+none = якщо новина НЕ підходить під жодну з категорій вище
 
-Категорії:
-- front: фронт, бої, ЗСУ, наступ, позиції, бригада
-- kyiv: Київ, столиця, київські новини
-- alarm: тривога, ракета, шахед, БпЛ, вибух, ППО, обстріл
-- allies: США, НАТО, допомога, зброя, союзники
-- russia: Росія, Москва, Кремль, Путін, РФ
-- strikes: прильоти в РФ, удари по росії, БПЛА атакував РФ
-- general: все інше"""
+2. Ознаки фейку/маніпуляції (is_fake: true/false): відсутність джерела, панічне формулювання, неперевірені чутки, явна пропаганда, провокаційний непідтверджений контент.
+
+Відповідай СУВОРО у форматі JSON, без жодного додаткового тексту:
+{"category": "front/kyiv/alarm/allies/russia/strikes/none", "is_fake": true, "fake_reason": "коротко або порожньо"}"""
 
         data = json.dumps({
             "model": "claude-sonnet-4-6",
@@ -136,21 +162,26 @@ async def analyze_with_ai(text, channel):
         with urllib.request.urlopen(req, timeout=15) as r:
             result = json.loads(r.read())
             txt = result["content"][0]["text"].strip()
-            # Чистим JSON если есть лишнее
             if "```" in txt:
                 txt = txt.split("```")[1].replace("json", "").strip()
             parsed = json.loads(txt)
-            category = parsed.get("category", "general")
-            is_fake = parsed.get("is_fake", "false") == "true"
+            category = parsed.get("category", "none")
+            is_fake = bool(parsed.get("is_fake", False))
             fake_reason = parsed.get("fake_reason", "")
-            print("    AI: категория=" + category + " фейк=" + str(is_fake))
+
+            if category not in VALID_CATEGORIES:
+                category = None
+
+            print("    AI: категория=" + str(category) + " фейк=" + str(is_fake))
             return category, is_fake, fake_reason
     except Exception as e:
         print("    Ошибка AI: " + str(e))
-        return get_category_simple(text), False, ""
+        # резервный вариант — пробуем по ключевым словам, фейк не помечаем
+        fallback_cat = get_category_simple(text)
+        return fallback_cat, False, ""
 
 def get_category_simple(text):
-    """Резервная категоризация по ключевым словам"""
+    """Резервная категоризация по ключевым словам (если AI недоступен)"""
     text_lower = text.lower()
     cats = {
         "front":   ["фронт", "передок", "наступ", "зсу", "бригада", "позиції", "бої", "штурм"],
@@ -164,7 +195,7 @@ def get_category_simple(text):
         for kw in keywords:
             if kw in text_lower:
                 return cat
-    return "general"
+    return None  # не подходит ни под одну — не публикуем
 
 def get_video_duration(msg):
     try:
@@ -303,6 +334,15 @@ async def process_channel(client, ch, seen):
             news_id = make_id(ch["username"], msg.id)
             if news_id in seen:
                 continue
+
+            # Помечаем как просмотренное в любом случае, чтобы не анализировать повторно
+            new_seen_ids.append(news_id)
+            seen.add(news_id)
+
+            # Фильтр свежести — только свежак
+            if not is_fresh(msg.date):
+                continue
+
             text = msg.text or msg.message or ""
             if len(text) < 10:
                 continue
@@ -328,8 +368,18 @@ async def process_channel(client, ch, seen):
                     img_url = thumb_url
                     media_type = "video_link"
 
-            # AI анализ
+            # AI анализ: категория + фейк
             category, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
+
+            # Не подходит ни под одну категорию — пропускаем
+            if category is None:
+                print("    Пропуск: не подходит ни под одну категорию")
+                continue
+
+            # Похоже на фейк — пропускаем
+            if is_fake:
+                print("    Пропуск: похоже на фейк (" + fake_reason + ")")
+                continue
 
             link = "https://t.me/" + ch["username"] + "/" + str(msg.id)
             title = text[:100].split("\n")[0]
@@ -347,14 +397,10 @@ async def process_channel(client, ch, seen):
                 "media_type": media_type,
                 "video_duration": video_duration,
                 "category": category,
-                "is_fake": is_fake,
-                "fake_reason": fake_reason,
                 "link": link,
                 "time": str(msg.date),
             }
             new_items.append(item)
-            seen.add(news_id)
-            new_seen_ids.append(news_id)
 
         if new_items:
             print("  + @" + ch["username"] + ": " + str(len(new_items)) + " новых")
@@ -396,10 +442,9 @@ async def run():
             if all_new_items:
                 push_to_api(all_new_items)
                 for item in all_new_items[:2]:
-                    cat_emoji = {"front":"⚔️","kyiv":"🏙","alarm":"🚨","allies":"🤝","russia":"🇷🇺","strikes":"💥"}.get(item.get("category",""), "📰")
-                    fake_label = " ⚠️ МОЖЛИВИЙ ФЕЙК" if item.get("is_fake") else ""
+                    cat_emoji = CATEGORY_EMOJI.get(item.get("category", ""), "📰")
                     msg_text = (
-                        cat_emoji + " " + item["emoji"] + " <b>@" + item["ch"] + "</b>" + fake_label + "\n\n"
+                        cat_emoji + " " + item["emoji"] + " <b>@" + item["ch"] + "</b>\n\n"
                         + "<b>" + item["title"] + "</b>\n\n"
                         + item["body"][:400] + "\n\n"
                         + "<a href='" + item["link"] + "'>Читать в Telegram</a>"
