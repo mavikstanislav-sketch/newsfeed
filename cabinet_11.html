@@ -389,6 +389,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 <div class="toast" id="toast"></div>
 
 <script>
+// Уникальный ID пользователя — из Telegram, либо свой (для браузера)
+let USER_ID = "";
 (function(){
   if(window.Telegram&&window.Telegram.WebApp){
     const tg=window.Telegram.WebApp;
@@ -396,6 +398,19 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
     tg.setHeaderColor('#0e1621');
     tg.setBackgroundColor('#0e1621');
     tg.MainButton.hide();
+    try{
+      if(tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id){
+        USER_ID = "tg"+tg.initDataUnsafe.user.id;
+      }
+    }catch(e){}
+  }
+  // Если ID не получили из Telegram (например открыто в браузере) — свой стабильный
+  if(!USER_ID){
+    USER_ID = localStorage.getItem('nf_uid');
+    if(!USER_ID){
+      USER_ID = "web"+Date.now()+Math.floor(Math.random()*100000);
+      localStorage.setItem('nf_uid',USER_ID);
+    }
   }
 })();
 
@@ -659,16 +674,37 @@ function toggleFav(id){
   uStats();
 }
 
-function react(id,type){
-  if(!userReacts[id])userReacts[id]={};
+async function react(id,type){
   const item=news.find(n=>n.id===id)||favorites.find(n=>n.id===id);
   if(!item||!item.reactions)return;
   const btn=document.getElementById('rb-'+type+'-'+id);
-  const cnt=document.getElementById('rc-'+type+'-'+id);
-  if(!btn||!cnt)return;
-  if(userReacts[id][type]){userReacts[id][type]=false;item.reactions[type]--;btn.classList.remove('active-'+type);}
-  else{userReacts[id][type]=true;item.reactions[type]++;btn.classList.add('active-'+type);btn.classList.add('pop');setTimeout(()=>btn.classList.remove('pop'),300);}
-  cnt.textContent=item.reactions[type];
+  if(btn){btn.classList.add('pop');setTimeout(()=>btn.classList.remove('pop'),300);}
+  try{
+    const r=await fetch(API_BASE+'/react',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({news_id:id,user_id:USER_ID,reaction:type})
+    });
+    const d=await r.json();
+    if(d.ok&&d.counts){
+      // Обновляем реальные счётчики с сервера
+      item.reactions=d.counts;
+      // Переключаем «мою» реакцию: если сервер посчитал — значит поставлена, иначе снята
+      if(!userReacts[id])userReacts[id]={};
+      const wasActive=userReacts[id][type];
+      // Сбрасываем все мои отметки на этой новости (один человек = одна реакция)
+      userReacts[id]={};
+      if(!wasActive)userReacts[id][type]=true;
+      // Перерисовываем счётчики и подсветку для всех трёх кнопок
+      ['like','fire','heart'].forEach(t=>{
+        const c=document.getElementById('rc-'+t+'-'+id);
+        if(c)c.textContent=item.reactions[t]||0;
+        const b=document.getElementById('rb-'+t+'-'+id);
+        if(b){b.classList.remove('active-like','active-fire','active-heart');if(userReacts[id][t])b.classList.add('active-'+t);}
+      });
+    }
+  }catch(e){
+    showT('Не вдалося зберегти реакцію');
+  }
 }
 
 function exp(id){
@@ -828,7 +864,7 @@ async function loadFeed(){
       category:item.category||'',
       city:item.city||'',
       link:item.link,
-      reactions:{like:Math.floor(Math.random()*80),fire:Math.floor(Math.random()*50),heart:Math.floor(Math.random()*60)}
+      reactions:{like:0,fire:0,heart:0}
     }));
 
     // Автоматически добавляем в локальный список любые новые каналы, найденные в новостях
@@ -851,11 +887,37 @@ async function loadFeed(){
     });
     if(channelsChanged)sCh();
 
+    // Подтягиваем реальные реакции с сервера
+    await loadReactions();
+
     rFeed();
     showT('Загружено '+news.length+' новостей ✓');
   }catch(e){
     list.innerHTML=`<div class="empty"><div class="empty-t">Ошибка загрузки</div><div class="empty-s">Проверь подключение</div></div>`;
   }
+}
+
+async function loadReactions(){
+  try{
+    const r=await fetch(API_BASE+'/reactions?user_id='+encodeURIComponent(USER_ID));
+    const d=await r.json();
+    const counts=d.counts||{};
+    const mine=d.mine||{};
+    // Проставляем счётчики каждой новости
+    news.forEach(n=>{
+      if(counts[n.id])n.reactions=counts[n.id];
+      else n.reactions={like:0,fire:0,heart:0};
+    });
+    favorites.forEach(n=>{
+      if(counts[n.id])n.reactions=counts[n.id];
+    });
+    // Запоминаем мои реакции
+    userReacts={};
+    Object.keys(mine).forEach(nid=>{
+      userReacts[nid]={};
+      userReacts[nid][mine[nid]]=true;
+    });
+  }catch(e){}
 }
 
 function refresh(){loadFeed();}
