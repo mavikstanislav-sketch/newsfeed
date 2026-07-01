@@ -423,7 +423,7 @@ def get_category_simple(text):
         for kw in keywords:
             if kw in text_lower:
                 return cat
-    return None
+    return None  # не подходит ни под одну — не публикуем
 
 # === ДЕДУПЛИКАЦИЯ ПОХОЖИХ НОВОСТЕЙ ===
 recent_published = []  # список (timestamp, set_слов, text)
@@ -635,8 +635,8 @@ async def process_channel(client, ch, seen):
                     img_url = thumb_url
                     media_type = "video_link"
 
-            # AI анализ: категория + фейк
-           category, city, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
+            # AI анализ: категория + город + фейк
+            category, city, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
 
             # Не подходит ни под одну категорию — пропускаем
             if category is None:
