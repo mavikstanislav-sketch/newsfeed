@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import urllib.request
 import urllib.parse
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 import psycopg2
 
@@ -15,6 +16,7 @@ API_URL = "https://newsfeed-production-9b3b.up.railway.app"
 API_ID   = 37103823
 API_HASH = "ebbfc63eb333bd7130ace1a23df460e9"
 SESSION  = "news_session"
+TELETHON_SESSION = os.environ.get("TELETHON_SESSION", "")
 DATABASE_URL = os.environ.get("PG_URL", "")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
@@ -697,7 +699,12 @@ async def run():
     seen = load_seen()
     print("Запускаю Telethon...")
 
-    client = TelegramClient(SESSION, API_ID, API_HASH)
+    if TELETHON_SESSION:
+        print("Использую сессию из переменной TELETHON_SESSION")
+        client = TelegramClient(StringSession(TELETHON_SESSION), API_ID, API_HASH)
+    else:
+        print("Использую файловую сессию news_session.session")
+        client = TelegramClient(SESSION, API_ID, API_HASH)
 
     # Устойчивое подключение: при AuthKeyDuplicatedError во время rolling-деплоя
     # (старый и новый контейнер на секунды пересекаются) — просто ждём и пробуем снова,
