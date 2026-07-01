@@ -62,7 +62,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 .cat-chip.on{color:#fff;border-color:transparent}
 .cat-chip[data-cat="all"].on{background:var(--blue)}
 .cat-chip[data-cat="front"].on{background:#e05555}
-.cat-chip[data-cat="kyiv"].on{background:#3d9ae8}
+.cat-chip[data-cat="mycity"].on{background:#3d9ae8}
 .cat-chip[data-cat="alarm"].on{background:#ff8c42}
 .cat-chip[data-cat="allies"].on{background:#4dcd5e}
 .cat-chip[data-cat="russia"].on{background:#6b7f94}
@@ -79,11 +79,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 /* CAT BADGE */
 .cat-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:8px;margin-bottom:7px}
 .cat-badge.front{background:rgba(224,85,85,0.15);color:#e05555}
-.cat-badge.kyiv{background:rgba(61,154,232,0.15);color:#3d9ae8}
+.cat-badge.mycity{background:rgba(61,154,232,0.15);color:#3d9ae8}
 .cat-badge.alarm{background:rgba(255,140,66,0.15);color:#ff8c42}
 .cat-badge.allies{background:rgba(77,205,94,0.15);color:#4dcd5e}
 .cat-badge.russia{background:rgba(107,127,148,0.15);color:#6b8a9e}
 .cat-badge.strikes{background:rgba(255,107,157,0.15);color:#ff6b9d}
+.city-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:8px;margin-bottom:7px;margin-left:5px;background:rgba(61,154,232,0.12);color:#6ab4f0}
 
 .msg-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .ch-avatar{width:34px;height:34px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;background:var(--s3);border:2px solid transparent}
@@ -277,7 +278,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 <div class="page active" id="page-feed">
   <div class="cat-bar" id="cat-bar">
     <button class="cat-chip" data-cat="front" onclick="setCat('front',this)">⚔️ Фронт</button>
-    <button class="cat-chip" data-cat="kyiv" onclick="setCat('kyiv',this)">🏙 Київ</button>
+    <button class="cat-chip" data-cat="mycity" onclick="setCat('mycity',this)">📍 Моє місто</button>
     <button class="cat-chip" data-cat="alarm" onclick="setCat('alarm',this)">🚨 Тривога</button>
     <button class="cat-chip" data-cat="allies" onclick="setCat('allies',this)">🤝 Союзники</button>
     <button class="cat-chip" data-cat="russia" onclick="setCat('russia',this)">🇷🇺 Росія</button>
@@ -323,6 +324,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
       <div class="p-stat"><div class="p-stat-n" id="ps-fav">0</div><div class="p-stat-l">избранных</div></div>
       <div class="p-stat"><div class="p-stat-n" id="ps-today">0</div><div class="p-stat-l">сегодня</div></div>
     </div>
+  </div>
+  <div class="set-section">
+    <div class="set-title">📍 Моє місто</div>
+    <div class="set-field">
+      <span class="set-label">Оберіть своє місто — у вкладці «Моє місто» будуть новини лише про нього</span>
+      <select class="set-inp" id="prof-city">
+        <option value="">— не вибрано —</option>
+      </select>
+    </div>
+    <button class="btn-save-set" onclick="saveCity()">Зберегти місто</button>
+    <div class="saved-ok" id="saved-city"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Збережено!</div>
   </div>
   <div class="set-section">
     <div class="set-title">Имя кабинета</div>
@@ -389,7 +401,15 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);-webkit-font
 
 const PASSWORD = "Sp2engom";
 const CH_COLORS=['#3d9ae8','#4dcd5e','#ff8c42','#ff6b9d','#a78bfa','#34d399','#f59e0b','#60a5fa'];
-const CAT_LABELS={all:'📰 Все',front:'⚔️ Фронт',kyiv:'🏙 Київ',alarm:'🚨 Тривога',allies:'🤝 Союзники',russia:'🇷🇺 Росія',strikes:'💥 Прильоти'};
+const CAT_LABELS={all:'📰 Все',front:'⚔️ Фронт',mycity:'📍 Моє місто',alarm:'🚨 Тривога',allies:'🤝 Союзники',russia:'🇷🇺 Росія',strikes:'💥 Прильоти'};
+
+// Список всех областных центров Украины + Киев
+const UA_CITIES=[
+  "Київ","Харків","Дніпро","Одеса","Львів","Запоріжжя","Кривий Ріг","Миколаїв",
+  "Вінниця","Полтава","Чернігів","Черкаси","Житомир","Суми","Хмельницький",
+  "Чернівці","Рівне","Кропивницький","Івано-Франківськ","Тернопіль","Луцьк",
+  "Ужгород","Херсон","Запоріжжя","Луганськ","Донецьк","Сімферополь"
+];
 
 // LOCK
 function checkPass(){
@@ -418,6 +438,7 @@ let profile=JSON.parse(localStorage.getItem('nf_pro')||'{"name":"Мой каби
 let favorites=JSON.parse(localStorage.getItem('nf_fav')||'[]');
 let readStats=JSON.parse(localStorage.getItem('nf_stats')||'{"total":0,"byDay":{},"byCh":{}}');
 let lang=localStorage.getItem('nf_lang')||'ru';
+let myCity=localStorage.getItem('nf_city')||'';
 let filt='all';
 let news=[];
 let userReacts={};
@@ -439,6 +460,47 @@ function applyAvatar(){
   if(em)em.style.display=url?'none':'';
 }
 
+// Заполнить выпадающий список городов в профиле
+function fillCityDropdown(){
+  const sel=document.getElementById('prof-city');
+  if(!sel)return;
+  const sorted=[...new Set(UA_CITIES)].sort((a,b)=>a.localeCompare(b,'uk'));
+  sel.innerHTML='<option value="">— не вибрано —</option>';
+  sorted.forEach(c=>{
+    const opt=document.createElement('option');
+    opt.value=c;opt.textContent=c;
+    if(c===myCity)opt.selected=true;
+    sel.appendChild(opt);
+  });
+}
+
+function saveCity(){
+  const sel=document.getElementById('prof-city');
+  myCity=sel.value||'';
+  localStorage.setItem('nf_city',myCity);
+  const el=document.getElementById('saved-city');el.style.display='flex';setTimeout(()=>el.style.display='none',2000);
+  // Обновим подпись на кнопке категории
+  updateMyCityChip();
+}
+
+// Меняем текст кнопки "Моє місто" на конкретный город, если выбран
+function updateMyCityChip(){
+  const chip=document.querySelector('.cat-chip[data-cat="mycity"]');
+  if(chip){
+    chip.textContent = myCity ? ('📍 '+myCity) : '📍 Моє місто';
+  }
+}
+
+// Проверка: относится ли новость к выбранному городу
+function newsMatchesCity(n){
+  if(!myCity)return false;
+  const nc=(n.city||'').toLowerCase().trim();
+  if(!nc)return false;
+  const mc=myCity.toLowerCase().trim();
+  // Совпадение, если одно содержит другое (устойчиво к "м. Київ" и т.п.)
+  return nc.includes(mc) || mc.includes(nc);
+}
+
 function pg(name,el){
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   if(el)el.classList.add('active');
@@ -449,7 +511,7 @@ function pg(name,el){
   document.getElementById('topbar-title').textContent=titles[name]||name;
   document.getElementById('topbar-sub').textContent=subs[name]||'';
   if(name==='channels'){rCh();loadPending();}
-  if(name==='profile')rPro();
+  if(name==='profile'){rPro();fillCityDropdown();}
   if(name==='fav')rFav();
   uStats();
 }
@@ -527,6 +589,8 @@ function buildCard(item){
   // Бейдж категории
   const catKey=item.category||'';
   const catBadge=catKey&&CAT_LABELS[catKey]?`<span class="cat-badge ${catKey}">${CAT_LABELS[catKey]}</span>`:'';
+  // Бейдж города
+  const cityBadge=item.city?`<span class="city-badge">📍 ${item.city}</span>`:'';
 
   return`<div class="msg-bubble" style="--ch-color:${chColor}" onclick="markRead('${item.ch}')">
     <div class="msg-header">
@@ -539,7 +603,7 @@ function buildCard(item){
       </div>
       <span class="msg-time-top">${item.time}</span>
     </div>
-    ${catBadge}
+    ${catBadge}${cityBadge}
     <div class="msg-title">${item.title}</div>
     ${mediaHtml}
     <div class="msg-body${item.exp?' exp':''}" id="b${item.id}">${item.body}</div>
@@ -564,7 +628,15 @@ function rFeed(){
   const list=document.getElementById('feed-list');list.innerHTML='';
   const active=channels.filter(c=>c.on).map(c=>c.username);
   let items=news.filter(n=>active.includes(n.ch));
-  if(filt!=='all')items=items.filter(n=>n.category===filt);
+  if(filt==='mycity'){
+    if(!myCity){
+      list.innerHTML=`<div class="empty"><div class="empty-t">Місто не вибрано</div><div class="empty-s">Відкрий Профіль → Моє місто та обери своє місто</div></div>`;
+      return;
+    }
+    items=items.filter(n=>newsMatchesCity(n));
+  } else if(filt!=='all'){
+    items=items.filter(n=>n.category===filt);
+  }
   if(!items.length){list.innerHTML=`<div class="empty"><div class="empty-t">Нет новостей</div><div class="empty-s">В этой категории пока пусто</div></div>`;return;}
   const d=mk('div','msg-date');
   d.innerHTML=`<span>${new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}</span>`;
@@ -638,7 +710,6 @@ function addCh(){
   sCh();rCh();uStats();
   ['cu','cn','ce'].forEach(id=>document.getElementById(id).value='');
   showT('Канал добавлен ✓');
-  // Сообщаем серверу, чтобы он реально начал мониторить этот канал
   fetch(API_BASE+'/pending-channels/approve',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:u,name:n||u,emoji:e})
@@ -755,6 +826,7 @@ async function loadFeed(){
       media_type:item.media_type||null,
       video_duration:item.video_duration||null,
       category:item.category||'',
+      city:item.city||'',
       link:item.link,
       reactions:{like:Math.floor(Math.random()*80),fire:Math.floor(Math.random()*50),heart:Math.floor(Math.random()*60)}
     }));
@@ -791,6 +863,7 @@ function refresh(){loadFeed();}
 function init(){
   if(profile.avatar)applyAvatar();
   document.getElementById('profile-uname').textContent=profile.name||'Мой кабинет';
+  updateMyCityChip();
   uStats();
   loadFeed();
   setInterval(loadFeed,5000);
