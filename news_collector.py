@@ -341,12 +341,11 @@ def is_fresh(msg_date):
 
 async def analyze_with_ai(text, channel):
     """
-    Claude анализирует новость — категория + фейк.
-    Возвращает (category или None, is_fake, fake_reason).
-    category=None означает "не подходит ни под одну из 6 категорий" -> не публикуем.
+    Claude анализирует новость — категория + город + фейк.
+    Возвращает (category или None, city, is_fake, fake_reason).
     """
     if not CLAUDE_API_KEY:
-        return get_category_simple(text), False, ""
+        return get_category_simple(text), "", False, ""
     try:
         prompt = """Ти — модератор українського новинного Telegram-каналу. Проаналізуй текст новини.
 
@@ -356,17 +355,18 @@ async def analyze_with_ai(text, channel):
 Визнач:
 1. Категорію (ОБЕРИ ОДНУ, найбільш відповідну):
 front = бойові дії, наступ, ЗСУ, бригади, позиції, фронт
-kyiv = новини про Київ, столицю
 alarm = повітряна тривога, ракети, шахеди, БпЛА, вибухи, ППО, обстріл
 allies = допомога від США/НАТО, зброя, заяви політиків-союзників
 russia = новини про Москву, Кремль, Путіна, внутрішні події в РФ
 strikes = удари по території Росії, атаки БПЛА на РФ, прильоти в РФ
 none = якщо новина НЕ підходить під жодну з категорій вище
 
-2. Ознаки фейку/маніпуляції (is_fake: true/false): відсутність джерела, панічне формулювання, неперевірені чутки, явна пропаганда, провокаційний непідтверджений контент.
+2. Місто (city): якщо новина стосується конкретного українського міста — назви його українською (наприклад "Київ", "Харків", "Дніпро", "Одеса", "Львів"). Якщо новина не прив'язана до конкретного міста — залиш порожнім.
+
+3. Ознаки фейку/маніпуляції (is_fake: true/false): відсутність джерела, панічне формулювання, неперевірені чутки, явна пропаганда, провокаційний непідтверджений контент.
 
 Відповідай СУВОРО у форматі JSON, без жодного додаткового тексту:
-{"category": "front/kyiv/alarm/allies/russia/strikes/none", "is_fake": true, "fake_reason": "коротко або порожньо"}"""
+{"category": "front/alarm/allies/russia/strikes/none", "city": "назва міста українською або порожньо", "is_fake": true, "fake_reason": "коротко або порожньо"}"""
 
         data = json.dumps({
             "model": "claude-sonnet-4-6",
@@ -395,26 +395,25 @@ none = якщо новина НЕ підходить під жодну з кат
                 txt = match.group(0)
             parsed = json.loads(txt)
             category = parsed.get("category", "none")
+            city = parsed.get("city", "") or ""
             is_fake = bool(parsed.get("is_fake", False))
             fake_reason = parsed.get("fake_reason", "")
 
             if category not in VALID_CATEGORIES:
                 category = None
 
-            print("    AI: категория=" + str(category) + " фейк=" + str(is_fake))
-            return category, is_fake, fake_reason
+            print("    AI: категория=" + str(category) + " город=" + str(city) + " фейк=" + str(is_fake))
+            return category, city, is_fake, fake_reason
     except Exception as e:
         print("    Ошибка AI: " + str(e))
-        # резервный вариант — пробуем по ключевым словам, фейк не помечаем
         fallback_cat = get_category_simple(text)
-        return fallback_cat, False, ""
+        return fallback_cat, "", False, ""
 
 def get_category_simple(text):
     """Резервная категоризация по ключевым словам (если AI недоступен)"""
     text_lower = text.lower()
     cats = {
         "front":   ["фронт", "передок", "наступ", "зсу", "бригада", "позиції", "бої", "штурм"],
-        "kyiv":    ["київ", "kyiv", "столиця", "київська"],
         "alarm":   ["тривога", "ракета", "шахед", "бпл", "вибух", "ппо", "обстріл"],
         "allies":  ["сша", "нато", "допомога", "зброя", "байден", "трамп"],
         "russia":  ["москва", "кремль", "путін", "росія", "рф"],
@@ -424,7 +423,7 @@ def get_category_simple(text):
         for kw in keywords:
             if kw in text_lower:
                 return cat
-    return None  # не подходит ни под одну — не публикуем
+    return None
 
 # === ДЕДУПЛИКАЦИЯ ПОХОЖИХ НОВОСТЕЙ ===
 recent_published = []  # список (timestamp, set_слов, text)
@@ -637,7 +636,7 @@ async def process_channel(client, ch, seen):
                     media_type = "video_link"
 
             # AI анализ: категория + фейк
-            category, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
+           category, city, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
 
             # Не подходит ни под одну категорию — пропускаем
             if category is None:
@@ -671,6 +670,7 @@ async def process_channel(client, ch, seen):
                 "media_type": media_type,
                 "video_duration": video_duration,
                 "category": category,
+                "city": city,
                 "link": link,
                 "time": str(msg.date),
             }
