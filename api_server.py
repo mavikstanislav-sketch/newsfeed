@@ -2,6 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import psycopg2
+import json
+import urllib.request
+from datetime import datetime, timezone, timedelta
+
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
+
+# Кэш сводки: {"text": "...", "time": datetime}
+_summary_cache = {"text": "", "time": None}
+SUMMARY_CACHE_MINUTES = 60  # обновлять сводку не чаще раза в час
 
 app = FastAPI()
 app.add_middleware(
@@ -271,6 +280,78 @@ def get_reactions(user_id: str = ""):
     except Exception as e:
         print(f"Ошибка reactions: {e}")
         return {"counts": {}, "mine": {}}
+
+@app.get("/summary")
+def get_summary():
+    """AI-сводка главных событий за последние 24 часа. Кэш на час."""
+    global _summary_cache
+    # Если есть свежая сводка в кэше — отдаём её, не дёргаем Claude лишний раз
+    if _summary_cache["text"] and _summary_cache["time"]:
+        age = datetime.now(timezone.utc) - _summary_cache["time"]
+        if age < timedelta(minutes=SUMMARY_CACHE_MINUTES):
+            return {"summary": _summary_cache["text"], "cached": True}
+
+    if not CLAUDE_API_KEY:
+        return {"summary": "", "error": "no API key"}
+
+    try:
+        # Берём заголовки новостей за последние 24 часа
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT title, category, city FROM news
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+            ORDER BY created_at DESC
+            LIMIT 60
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        if not rows:
+            return {"summary": "За останню добу новин поки немає.", "cached": False}
+
+        # Собираем заголовки в текст для Claude
+        news_block = ""
+        for i, r in enumerate(rows, 1):
+            title = (r[0] or "").replace("\n", " ")[:150]
+            cat = r[1] or ""
+            city = r[2] or ""
+            extra = ""
+            if city:
+                extra = " [" + city + "]"
+            news_block += str(i) + ". " + title + extra + "\n"
+
+        prompt = ("Ось заголовки українських новин за останню добу:\n\n"
+                  + news_block + "\n"
+                  "Зроби коротку зведення головних подій дня — 5-7 найважливіших пунктів. "
+                  "Кожен пункт з нового рядка, починай з '• '. Пиши українською, стисло, "
+                  "об'єднуй схожі новини в один пункт. Без вступу і висновку, лише пункти.")
+
+        data = json.dumps({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 600,
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": CLAUDE_API_KEY,
+                "anthropic-version": "2023-06-01"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read())
+            summary_text = result["content"][0]["text"].strip()
+
+        _summary_cache = {"text": summary_text, "time": datetime.now(timezone.utc)}
+        return {"summary": summary_text, "cached": False}
+    except Exception as e:
+        print(f"Ошибка summary: {e}")
+        return {"summary": "", "error": str(e)}
 
 @app.get("/news")
 def get_news():
