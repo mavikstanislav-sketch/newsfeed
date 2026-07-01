@@ -72,6 +72,15 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reactions (
+                news_id TEXT,
+                user_id TEXT,
+                reaction TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (news_id, user_id)
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -196,6 +205,72 @@ def clear_news():
         return {"ok": True, "message": "Все новости удалены"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+@app.post("/react")
+def react(data: dict):
+    news_id = data.get("news_id")
+    user_id = data.get("user_id")
+    reaction = data.get("reaction")  # like / fire / heart
+    if not news_id or not user_id or not reaction:
+        return {"ok": False, "error": "news_id, user_id, reaction required"}
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        # Смотрим, была ли уже реакция этого пользователя на эту новость
+        cur.execute("SELECT reaction FROM reactions WHERE news_id=%s AND user_id=%s", (news_id, user_id))
+        row = cur.fetchone()
+        if row and row[0] == reaction:
+            # Та же реакция повторно — убираем (toggle off)
+            cur.execute("DELETE FROM reactions WHERE news_id=%s AND user_id=%s", (news_id, user_id))
+        else:
+            # Новая реакция или смена реакции — записываем/обновляем
+            cur.execute("""
+                INSERT INTO reactions (news_id, user_id, reaction)
+                VALUES (%s,%s,%s)
+                ON CONFLICT (news_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction
+            """, (news_id, user_id, reaction))
+        conn.commit()
+        # Возвращаем свежие счётчики для этой новости
+        cur.execute("""
+            SELECT reaction, COUNT(*) FROM reactions WHERE news_id=%s GROUP BY reaction
+        """, (news_id,))
+        counts = {"like": 0, "fire": 0, "heart": 0}
+        for r in cur.fetchall():
+            if r[0] in counts:
+                counts[r[0]] = r[1]
+        cur.close()
+        conn.close()
+        return {"ok": True, "counts": counts}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/reactions")
+def get_reactions(user_id: str = ""):
+    """Возвращает счётчики реакций по всем новостям + что выбрал этот пользователь"""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        # Счётчики по всем новостям
+        cur.execute("SELECT news_id, reaction, COUNT(*) FROM reactions GROUP BY news_id, reaction")
+        counts = {}
+        for r in cur.fetchall():
+            nid, rtype, cnt = r[0], r[1], r[2]
+            if nid not in counts:
+                counts[nid] = {"like": 0, "fire": 0, "heart": 0}
+            if rtype in counts[nid]:
+                counts[nid][rtype] = cnt
+        # Что выбрал этот пользователь
+        mine = {}
+        if user_id:
+            cur.execute("SELECT news_id, reaction FROM reactions WHERE user_id=%s", (user_id,))
+            for r in cur.fetchall():
+                mine[r[0]] = r[1]
+        cur.close()
+        conn.close()
+        return {"counts": counts, "mine": mine}
+    except Exception as e:
+        print(f"Ошибка reactions: {e}")
+        return {"counts": {}, "mine": {}}
 
 @app.get("/news")
 def get_news():
