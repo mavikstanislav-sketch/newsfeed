@@ -48,7 +48,7 @@ GLOBAL_SEARCH_LIMIT = 8
 
 CATEGORY_EMOJI = {
     "front": "⚔️",
-    "kyiv": "🏙",
+    "mycity": "📍",
     "alarm": "🚨",
     "allies": "🤝",
     "russia": "🇷🇺",
@@ -638,7 +638,12 @@ async def process_channel(client, ch, seen):
             # AI анализ: категория + город + фейк
             category, city, is_fake, fake_reason = await analyze_with_ai(text, ch["username"])
 
-            # Не подходит ни под одну категорию — пропускаем
+            # Если категории нет, но AI определил город — это городская новость
+            if category is None and city:
+                category = "mycity"
+                print("    Городская новость без категории -> mycity (" + city + ")")
+
+            # Не подходит ни под одну категорию и нет города — пропускаем
             if category is None:
                 print("    Пропуск: не подходит ни под одну категорию")
                 continue
